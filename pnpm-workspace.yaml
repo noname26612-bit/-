@@ -1,0 +1,7 @@
+# Какие postinstall-скрипты зависимостей разрешены (pnpm 11 требует явного решения).
+# Prisma-движки нужны для migrate/generate; sharp/unrs-resolver — необязательны (бинарники готовы).
+allowBuilds:
+  '@prisma/engines': true
+  prisma: true
+  sharp: false
+  unrs-resolver: false

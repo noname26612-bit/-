@@ -1,0 +1,29 @@
+# dependencies / build
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# env & secrets
+.env
+.env.local
+.env.production
+
+# data
+/data/
+uploads/
+*.dump
+backups/
+
+# tests
+playwright-report/
+test-results/
+coverage/
+
+# misc
+*.log
+.DS_Store
+
+/src/generated/prisma
