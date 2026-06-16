@@ -66,7 +66,7 @@ model User {
   tasks        Task[]      @relation("assignee")
   createdTasks Task[]      @relation("creator")
   events       TaskEvent[]
-  // pushSubs — этап 5 (web-push)
+  pushSubs     PushSubscription[] // этап 5 (web-push): подписки устройств этого пользователя
 }
 
 // Справочник типов задач (PRD §3). Новые типы заводит админ без правки кода.
@@ -163,4 +163,19 @@ model Attachment {
   createdAt   DateTime       @default(now())
 
   @@index([taskId, createdAt])
+}
+
+// Подписка устройства на web-push (ARCHITECTURE §4, §8). Одна запись = один браузер/устройство
+// пользователя. endpoint уникален. Протухшие подписки (HTTP 404/410 при отправке) сервис удаляет.
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String // ключ шифрования из subscription.keys.p256dh
+  auth      String // ключ аутентификации из subscription.keys.auth
+  userAgent String? // для отладки/опознания устройства
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }

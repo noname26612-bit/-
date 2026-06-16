@@ -19,8 +19,8 @@
 | Auth | Auth.js (NextAuth v5), Credentials provider | логин+пароль, JWT-cookie, роли в БД |
 | UI | Tailwind CSS + минимальный собственный набор контролов в `src/components/ui` | статус-цвета из UI-гайдлайна (skill ui-guidelines). shadcn/ui отложен (трения init с Tailwind v4 в этой среде); набор примитивов держим единым, при необходимости перейдём на shadcn |
 | Данные на клиенте | SWR (поллинг 10 с) | этап 6 — SSE, если поллинга не хватит |
-| PWA | Serwist (наследник next-pwa) + Web App Manifest | водители — Android/Chrome |
-| Push | Web Push API + библиотека web-push (VAPID) | подписки в БД |
+| PWA | Web App Manifest + рукописный service worker `public/sw.js` (только push) | водители — Android/Chrome. Serwist/offline-кэш **отложен** (этап 5): на Next 16 он требует webpack-сборки, а оффлайн-кэш для всегда-онлайн сценария не нужен; вернёмся к Serwist, если понадобится оффлайн |
+| Push | Web Push API + библиотека web-push 3.6 (VAPID) | подписки в БД (`PushSubscription`); протухшие (404/410) чистятся |
 | Фото | локальный volume + раздача через route handler с проверкой прав | S3-совместимое хранилище — фаза 3 |
 | Деплой | Docker Compose: app + postgres + Caddy (авто-HTTPS) | VPS в РФ (Timeweb Cloud / Selectel) |
 | Тесты | Vitest (unit/домен) + Playwright (e2e) | обязательные тесты изоляции |
@@ -40,11 +40,19 @@ src/
     task-status.ts              # допустимые переходы + кто может
     authz.ts                    # canView / canTransition / assertOwnership
     task-service.ts             # создание, назначение, смена статуса (+события, +пуши)
+    notifications.ts            # чистые билдеры пушей + валидация подписки (юнит-тесты)
+    push-service.ts             # подписки (save/delete) + плановые напоминания (cron)
     kpi.ts                      # KPI (Фаза 1.5): детекторы нарушений + прогрессивный расчёт (чистые функции, юнит-тесты)
     kpi-service.ts              # KPI: кандидаты, подтверждение/отклонение, ручные отметки, закрытие месяца, расчёт водителя (с изоляцией)
-  lib/                          # prisma client, auth, push, upload, утилиты
-  components/                   # ui-компоненты
+  lib/                          # prisma client, auth, утилиты
+    push.ts                     # транспорт web-push (server-only): отправка + чистка протухших подписок
+    cron.ts                     # планировщик node-cron (08:00 / 16:00)
+  components/                   # ui-компоненты (+ sw-register, pwa-controls — этап 5)
+  hooks/                        # use-push-subscription, use-install-prompt (этап 5)
+  instrumentation.ts            # register(): старт node-cron в Node-рантайме
+  app/manifest.ts               # Web App Manifest (/manifest.webmanifest)
 prisma/schema.prisma
+public/sw.js                    # рукописный service worker (push + notificationclick)
 docker-compose.yml / Caddyfile
 .claude/skills/                 # скиллы агента (см. папку skills)
 CLAUDE.md
@@ -306,8 +314,8 @@ model PayrollStatement {
 ## 8. Real-time, пуши, фоновые задачи
 
 - MVP: SWR с `refreshInterval: 10_000` на доске и в списке водителя + мгновенный optimistic update своих действий. Для 3 пользователей этого достаточно; SSE — этап 6, только если поллинг будет ощущаться.
-- Push: при назначении/изменении/отмене задачи — web-push всем подпискам водителя; payload минимальный (номер, заголовок, deeplink в карточку). Тап по пушу открывает PWA на задаче.
-- Планировщик (node-cron в том же процессе): утреннее напоминание водителям (08:00), предупреждение Милене о незаказанных пропусках на завтра (16:00).
+- Push (этап 5, реализовано): при назначении/изменении/переносе/отмене задачи `task-service` вызывает `notifyTaskAssignee` (fire-and-forget) → web-push всем подпискам водителя; payload минимальный (номер, заголовок, deeplink в карточку). Подписка/отписка устройства — `POST /api/push/{subscribe,unsubscribe}` (личность из сессии). Service worker `public/sw.js` показывает уведомление и по тапу открывает/фокусирует карточку. Протухшие подписки (404/410) сервис удаляет. Не уведомляем актора, если он сам — исполнитель.
+- Планировщик (node-cron в том же процессе, этап 5): старт из `src/instrumentation.ts` (`register`, только Node-рантайм) → `src/lib/cron.ts`. Утреннее напоминание водителям (08:00) и предупреждение диспетчеру о незаказанных пропусках на завтра (16:00), таймзона `CRON_TZ` (по умолч. Europe/Moscow). **Один процесс на проде** — иначе задачи задвоятся (deploy-release: не запускать в кластере/нескольких репликах). Защита от повторной регистрации — флаг в `globalThis` + `cron.getTasks()`.
 - KPI-детекторы (Фаза 1.5, тот же node-cron, ночной прогон ~23:30): по задачам за день создаёт кандидатов в `KpiMark` со `status=CANDIDATE` — опоздание (отметка «На месте» позже `timeTo`), не подписан акт (тип с `requiresSignedDoc`, DONE без документа-вложения), не выполнена точка (назначенная на день задача не в DONE/CANCELLED/RESCHEDULED). Идемпотентно (`@@unique([taskId, kind])`), безопасно повторно прогонять. Неоднозначное окно времени (нечитаемый `timeTo`) — пропускаем, Милена добавит вручную. Решение по каждому кандидату — за Миленой, авто-штрафов без подтверждения нет.
 
 ## 9. Деплой и эксплуатация
@@ -315,7 +323,7 @@ model PayrollStatement {
 - VPS в РФ (2 vCPU / 2–4 ГБ): Docker Compose — `app` (Next.js standalone), `postgres` (volume `pgdata`), `caddy` (80/443, авто-TLS). Фото — volume `/data/uploads`.
 - Бэкапы (cron на VPS): `pg_dump` ежедневно + tar uploads, хранение 14 дней локально + копия наружу (рекомендация: S3-совместимый бакет или хотя бы rsync на второй сервер/диск). Восстановление отрепетировать до пилота.
 - Релиз: см. skill deploy-release (миграции → бэкап → up → healthcheck → smoke).
-- Env: `DATABASE_URL`, `AUTH_SECRET`, `VAPID_PUBLIC/PRIVATE`, `UPLOADS_DIR`. Секреты — только в `.env` на сервере, в репозитории — `.env.example`.
+- Env: `DATABASE_URL`, `AUTH_SECRET`, `AUTH_TRUST_HOST`, `SEED_PASSWORD`, `UPLOADS_DIR`, `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`/`VAPID_SUBJECT`, `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (тот же публичный ключ — уезжает в браузер для подписки), `CRON_TZ`. Секреты — только в `.env` на сервере, в репозитории — `.env.example`.
 - Логи: pino в stdout, `docker logs`; событийный журнал доступа — TaskEvent + auth-лог.
 
 ## 10. Тестирование
