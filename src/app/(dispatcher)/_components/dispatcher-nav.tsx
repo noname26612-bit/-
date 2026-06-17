@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 
 const LINKS = [
   { href: "/board", label: "Сегодня" },
+  { href: "/planning", label: "Планирование" },
   { href: "/tasks", label: "Все задачи" },
   { href: "/kpi", label: "KPI / Зарплата" },
 ];
