@@ -3,16 +3,28 @@
 import { useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
-import { Plus } from "lucide-react";
+import { Plus, AlertTriangle, RefreshCw } from "lucide-react";
 import { fetcher, apiSend } from "@/lib/fetcher";
-import type { DriverDTO, TaskDTO, TaskTypeDTO } from "@/lib/task-dto";
-import { STATUS_BADGE, STATUS_BAR, STATUS_LABEL, PASS_BADGE, PASS_LABEL, formatDate } from "@/lib/task-ui";
+import type { AttentionDTO, DriverDTO, TaskDTO, TaskTypeDTO } from "@/lib/task-dto";
+import {
+  STATUS_BADGE,
+  STATUS_BAR,
+  STATUS_LABEL,
+  PASS_BADGE,
+  PASS_LABEL,
+  formatDate,
+  formatDateShort,
+} from "@/lib/task-ui";
 import { TypeIcon } from "@/components/type-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CreateTaskModal } from "../_components/create-task-modal";
 
 type DropTarget = { kind: "driver"; driverId: string } | { kind: "unassigned" } | { kind: "undated" };
+
+// Опции живого обновления (Этап 6): поллинг 10 с; keepPreviousData держит прошлые данные во время
+// фонового запроса — раскладка не дёргается, скелетоны только на самой первой загрузке.
+const LIVE = { refreshInterval: 10_000, keepPreviousData: true, revalidateOnFocus: true } as const;
 
 export function BoardClient({
   drivers,
@@ -24,22 +36,32 @@ export function BoardClient({
   today: string;
 }) {
   const key = `/api/tasks?date=${today}&includeUndated=1`;
-  const { data: tasks = [], isLoading, mutate } = useSWR<TaskDTO[]>(key, fetcher);
+  const { data: tasks, isLoading, error: loadError, mutate } = useSWR<TaskDTO[]>(key, fetcher, LIVE);
+  const { data: attention, mutate: mutateAttention } = useSWR<AttentionDTO>(
+    `/api/board/attention?date=${today}`,
+    fetcher,
+    LIVE,
+  );
   const [createOpen, setCreateOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const undated = tasks.filter((t) => !t.scheduledDate);
-  const dated = tasks.filter((t) => t.scheduledDate);
+  const list = tasks ?? [];
+  const undated = list.filter((t) => !t.scheduledDate);
+  const dated = list.filter((t) => t.scheduledDate);
   const unassignedToday = dated.filter((t) => !t.assigneeId);
 
   const total = dated.length;
   const inWork = dated.filter((t) => ["ACCEPTED", "EN_ROUTE", "ON_SITE"].includes(t.status)).length;
   const done = dated.filter((t) => t.status === "DONE").length;
+  const attentionCount = (attention?.overdue.length ?? 0) + (attention?.tomorrowPasses.length ?? 0);
+
+  // Обновить разом обе ленты (после перетаскивания/назначения «внимание» тоже могло измениться).
+  const refresh = () => Promise.all([mutate(), mutateAttention()]);
 
   async function onDrop(taskId: string, target: DropTarget) {
-    const task = tasks.find((t) => t.id === taskId);
+    const task = list.find((t) => t.id === taskId);
     if (!task) return;
-    setError(null);
+    setActionError(null);
     try {
       if (target.kind === "undated") {
         await apiSend(`/api/tasks/${taskId}`, "PATCH", { op: "edit", scheduledDate: null });
@@ -50,73 +72,99 @@ export function BoardClient({
         const assigneeId = target.kind === "driver" ? target.driverId : null;
         await apiSend(`/api/tasks/${taskId}`, "PATCH", { op: "assign", assigneeId });
       }
-      await mutate();
+      await refresh();
     } catch (e) {
-      setError((e as Error).message);
+      setActionError((e as Error).message);
     }
   }
 
   async function quickAssign(taskId: string, assigneeId: string) {
-    setError(null);
+    setActionError(null);
     try {
       await apiSend(`/api/tasks/${taskId}`, "PATCH", { op: "assign", assigneeId: assigneeId || null });
-      await mutate();
+      await refresh();
     } catch (e) {
-      setError((e as Error).message);
+      setActionError((e as Error).message);
     }
   }
 
+  const firstLoad = isLoading && !tasks;
+  // Ошибка фонового обновления, но данные уже есть — показываем спокойный индикатор, не сносим доску.
+  const staleError = loadError && tasks;
+
   return (
-    <div className="p-4">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-4">
-          <h1 className="text-xl font-semibold text-neutral-900">Сегодня · {formatDate(today)}</h1>
-          <div className="flex gap-3 text-sm text-neutral-500">
-            <span>Всего: <b className="text-neutral-900">{total}</b></span>
-            <span>В работе: <b className="text-neutral-900">{inWork}</b></span>
-            <span>Выполнено: <b className="text-neutral-900">{done}</b></span>
-            <span>Не назначено: <b className="text-neutral-900">{unassignedToday.length}</b></span>
-          </div>
-        </div>
+    <div className="p-4" data-testid="board">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold text-neutral-900">Сегодня · {formatDate(today)}</h1>
         <Button onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4" /> Задача
         </Button>
       </div>
 
-      {error ? <p className="mb-3 text-sm text-red-600">{error}</p> : null}
-      {isLoading ? <p className="text-sm text-neutral-400">Загрузка…</p> : null}
-
-      <div className="flex gap-3 overflow-x-auto pb-4">
-        <Column
-          title="Без даты"
-          hint="пул для планирования"
-          tasks={undated}
-          drivers={drivers}
-          target={{ kind: "undated" }}
-          onDropTask={onDrop}
-          onQuickAssign={quickAssign}
+      {/* Счётчики (PRD §8, ui-guidelines): всего / в работе / выполнено / требуют внимания */}
+      <div className="mb-4 flex flex-wrap gap-2">
+        <Stat label="Всего" value={total} />
+        <Stat label="В работе" value={inWork} tone="blue" />
+        <Stat label="Выполнено" value={done} tone="green" />
+        <Stat
+          label="Требуют внимания"
+          value={attentionCount}
+          tone={attentionCount > 0 ? "amber" : "muted"}
+          testId="stat-attention"
+          onClick={attentionCount > 0 ? () => scrollToAttention() : undefined}
         />
-        <Column
-          title="Не назначено"
-          tasks={unassignedToday}
-          drivers={drivers}
-          target={{ kind: "unassigned" }}
-          onDropTask={onDrop}
-          onQuickAssign={quickAssign}
-        />
-        {drivers.map((d) => (
-          <Column
-            key={d.id}
-            title={d.name}
-            hint={d.canLogin ? undefined : "внешний"}
-            tasks={dated.filter((t) => t.assigneeId === d.id)}
-            drivers={drivers}
-            target={{ kind: "driver", driverId: d.id }}
-            onDropTask={onDrop}
-            onQuickAssign={quickAssign}
-          />
-        ))}
+        <Stat label="Не назначено" value={unassignedToday.length} tone="muted" />
       </div>
+
+      {actionError ? <p className="mb-3 text-sm text-red-600">{actionError}</p> : null}
+      {staleError ? (
+        <p className="mb-3 flex items-center gap-1.5 text-sm text-amber-700">
+          <RefreshCw className="h-3.5 w-3.5" /> Не удалось обновить — показаны последние данные.
+        </p>
+      ) : null}
+
+      {/* Первая загрузка — скелетон (без дёрганья на последующих поллингах) */}
+      {firstLoad ? (
+        <BoardSkeleton driverCount={drivers.length} />
+      ) : loadError && !tasks ? (
+        <ErrorState onRetry={() => void refresh()} />
+      ) : (
+        <>
+          {attentionCount > 0 && attention ? <AttentionBlock attention={attention} /> : null}
+
+          <div className="flex gap-3 overflow-x-auto pb-4">
+            <Column
+              title="Без даты"
+              hint="пул для планирования"
+              tasks={undated}
+              drivers={drivers}
+              target={{ kind: "undated" }}
+              onDropTask={onDrop}
+              onQuickAssign={quickAssign}
+            />
+            <Column
+              title="Не назначено"
+              tasks={unassignedToday}
+              drivers={drivers}
+              target={{ kind: "unassigned" }}
+              onDropTask={onDrop}
+              onQuickAssign={quickAssign}
+            />
+            {drivers.map((d) => (
+              <Column
+                key={d.id}
+                title={d.name}
+                hint={d.canLogin ? undefined : "внешний"}
+                tasks={dated.filter((t) => t.assigneeId === d.id)}
+                drivers={drivers}
+                target={{ kind: "driver", driverId: d.id }}
+                onDropTask={onDrop}
+                onQuickAssign={quickAssign}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
       <CreateTaskModal
         open={createOpen}
@@ -124,8 +172,137 @@ export function BoardClient({
         types={types}
         drivers={drivers}
         defaultDate={today}
-        onCreated={() => void mutate()}
+        onCreated={() => void refresh()}
       />
+    </div>
+  );
+}
+
+function scrollToAttention() {
+  document.getElementById("attention")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function Stat({
+  label,
+  value,
+  tone = "neutral",
+  onClick,
+  testId,
+}: {
+  label: string;
+  value: number;
+  tone?: "neutral" | "blue" | "green" | "amber" | "muted";
+  onClick?: () => void;
+  testId?: string;
+}) {
+  const tones: Record<string, string> = {
+    neutral: "border-neutral-200 bg-white text-neutral-900",
+    blue: "border-blue-200 bg-blue-50 text-blue-800",
+    green: "border-green-200 bg-green-50 text-green-800",
+    amber: "border-amber-300 bg-amber-50 text-amber-900",
+    muted: "border-neutral-200 bg-neutral-50 text-neutral-500",
+  };
+  const className = `flex items-baseline gap-1.5 rounded-lg border px-3 py-1.5 text-sm ${tones[tone]} ${
+    onClick ? "cursor-pointer hover:brightness-95" : ""
+  }`;
+  const content = (
+    <>
+      <span className="text-xs opacity-70">{label}</span>
+      <b className="text-base">{value}</b>
+    </>
+  );
+  return onClick ? (
+    <button type="button" onClick={onClick} className={className} data-testid={testId}>
+      {content}
+    </button>
+  ) : (
+    <div className={className} data-testid={testId}>
+      {content}
+    </div>
+  );
+}
+
+function AttentionBlock({ attention }: { attention: AttentionDTO }) {
+  return (
+    <section
+      id="attention"
+      data-testid="attention-block"
+      className="mb-4 rounded-xl border border-amber-200 bg-amber-50/60 p-3"
+    >
+      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-900">
+        <AlertTriangle className="h-4 w-4" /> Требуют внимания
+      </h2>
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Сначала пропуска на завтра — их надо заказать сегодня */}
+        {attention.tomorrowPasses.map((t) => (
+          <AttentionItem
+            key={`pass-${t.id}`}
+            task={t}
+            chip={<Badge className="bg-amber-100 text-amber-800">Пропуск на завтра не заказан</Badge>}
+          />
+        ))}
+        {attention.overdue.map((t) => (
+          <AttentionItem
+            key={`overdue-${t.id}`}
+            task={t}
+            chip={
+              <Badge className="bg-red-100 text-red-700">
+                Просрочено · {formatDateShort(t.scheduledDate)}
+              </Badge>
+            }
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AttentionItem({ task, chip }: { task: TaskDTO; chip: React.ReactNode }) {
+  return (
+    <Link
+      href={`/tasks/${task.id}`}
+      className="flex flex-col gap-1 rounded-lg border border-amber-200 bg-white p-2 shadow-sm hover:border-amber-300"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-sm font-medium text-neutral-900">
+          <TypeIcon name={task.type.icon} className="h-4 w-4 text-neutral-500" />№{task.number}
+          {task.priority ? <span className="text-red-500">●</span> : null}
+        </span>
+        <Badge className={STATUS_BADGE[task.status]}>{STATUS_LABEL[task.status]}</Badge>
+      </div>
+      <span className="truncate text-sm text-neutral-800">{task.title}</span>
+      <span className="truncate text-xs text-neutral-500">
+        {task.assignee?.name ?? "Не назначено"} · {task.address}
+      </span>
+      <span>{chip}</span>
+    </Link>
+  );
+}
+
+function ErrorState({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center">
+      <p className="text-sm text-red-700">Не удалось загрузить доску.</p>
+      <Button variant="secondary" className="mt-3" onClick={onRetry}>
+        <RefreshCw className="h-4 w-4" /> Повторить
+      </Button>
+    </div>
+  );
+}
+
+function BoardSkeleton({ driverCount }: { driverCount: number }) {
+  const columns = driverCount + 2; // «Без даты» + «Не назначено» + водители
+  return (
+    <div className="flex gap-3 overflow-x-auto pb-4" aria-hidden>
+      {Array.from({ length: columns }).map((_, i) => (
+        <div key={i} className="flex w-72 shrink-0 flex-col">
+          <div className="mb-2 h-4 w-24 animate-pulse rounded bg-neutral-200" />
+          <div className="flex min-h-32 flex-1 flex-col gap-2 rounded-xl border border-neutral-200 bg-neutral-50 p-2">
+            <div className="h-20 animate-pulse rounded-lg bg-neutral-200" />
+            <div className="h-20 animate-pulse rounded-lg bg-neutral-200" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -197,6 +374,7 @@ function BoardCard({
   return (
     <div
       draggable
+      data-testid="board-card"
       onDragStart={(e) => e.dataTransfer.setData("text/plain", task.id)}
       className="relative cursor-grab rounded-lg border border-neutral-200 bg-white p-2 pl-3 shadow-sm active:cursor-grabbing"
     >

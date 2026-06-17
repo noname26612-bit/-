@@ -48,6 +48,12 @@ export type TaskDTO = {
   type: TaskTypeDTO;
 };
 
+// Блок «Требуют внимания» доски (Этап 6): просрочки + незаказанные пропуска на завтра.
+export type AttentionDTO = {
+  overdue: TaskDTO[];
+  tomorrowPasses: TaskDTO[];
+};
+
 export type TaskEventDTO = {
   id: string;
   kind: string;

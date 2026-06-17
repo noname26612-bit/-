@@ -37,7 +37,9 @@ export function AllTasksClient({
   if (dateFrom) params.set("dateFrom", dateFrom);
   if (dateTo) params.set("dateTo", dateTo);
   const key = `/api/tasks?${params.toString()}`;
-  const { data: tasks = [], isLoading, mutate } = useSWR<TaskDTO[]>(key, fetcher);
+  const { data: tasks = [], isLoading, error, mutate } = useSWR<TaskDTO[]>(key, fetcher, {
+    keepPreviousData: true,
+  });
 
   return (
     <div className="p-4">
@@ -79,7 +81,9 @@ export function AllTasksClient({
         <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
       </div>
 
-      {isLoading ? <p className="text-sm text-neutral-400">Загрузка…</p> : null}
+      {isLoading && tasks.length === 0 ? (
+        <p className="text-sm text-neutral-400">Загрузка…</p>
+      ) : null}
 
       <div className="overflow-x-auto rounded-xl border border-neutral-200 bg-white">
         <table className="w-full text-left text-sm">
@@ -95,7 +99,20 @@ export function AllTasksClient({
             </tr>
           </thead>
           <tbody>
-            {tasks.length === 0 && !isLoading ? (
+            {error && tasks.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-3 py-8 text-center">
+                  <p className="text-sm text-red-600">Не удалось загрузить список.</p>
+                  <button
+                    type="button"
+                    onClick={() => void mutate()}
+                    className="mt-2 text-sm text-neutral-600 underline"
+                  >
+                    Повторить
+                  </button>
+                </td>
+              </tr>
+            ) : tasks.length === 0 && !isLoading ? (
               <tr>
                 <td colSpan={7} className="px-3 py-8 text-center text-neutral-400">
                   Задач не найдено

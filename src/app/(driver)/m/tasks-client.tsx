@@ -39,6 +39,8 @@ export function DriverTasksClient() {
 
   const active = tasks.filter((t) => !isTerminal(t.status));
   const done = tasks.filter((t) => isTerminal(t.status)); // в «Сегодня» это завершённые за день
+  // Ошибка фонового поллинга, но задачи уже загружены — не сносим список (плохая сеть на объекте).
+  const staleError = error && tasks.length > 0;
 
   return (
     <main className="px-3 pb-10 pt-3">
@@ -58,7 +60,13 @@ export function DriverTasksClient() {
           : `Завтра и позже · задач: ${tasks.length}`}
       </p>
 
-      {error ? (
+      {staleError ? (
+        <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
+          Нет связи — показываю последнее. Обновлю автоматически.
+        </p>
+      ) : null}
+
+      {error && tasks.length === 0 ? (
         <p className="rounded-lg bg-red-50 px-3 py-4 text-base text-red-700">
           Не удалось загрузить список. Проверяю связь…
         </p>
