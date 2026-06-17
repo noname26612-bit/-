@@ -7,6 +7,7 @@ import type { PassStatus, PaymentType, Role, TaskStatus } from "@/generated/pris
 import { checkTransition, isDispatcherRole } from "./task-status";
 import { canViewTask } from "./authz";
 import { myTasksWhere, type MyTasksScope } from "./my-tasks";
+import { overdueWhere, tomorrowPassWhere } from "./attention";
 import { isReportPhotoMissing } from "./attachments";
 import { Errors } from "./errors";
 import { notifyTaskAssignee } from "@/lib/push";
@@ -166,6 +167,37 @@ export async function listMyTasks(
       { number: "asc" },
     ],
   });
+}
+
+export type BoardAttention = {
+  overdue: TaskListItem[]; // незавершённые с прошедшей датой
+  tomorrowPasses: TaskListItem[]; // на завтра пропуск «нужен, не заказан» (PRD §6)
+};
+
+/**
+ * Блок «Требуют внимания» для доски диспетчера (Этап 6). Только для диспетчера/админа —
+ * вызывается из эндпоинта за requireDispatcher (он видит все задачи, PRD §2).
+ * `today` — локальная дата клиента «YYYY-MM-DD»; завтра считаем как today+1 (UTC, как @db.Date).
+ */
+export async function listAttention(today: string): Promise<BoardAttention> {
+  const todayDate = parseDate(today);
+  if (!todayDate) throw Errors.validation("Некорректная дата");
+  const tomorrow = new Date(todayDate);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+
+  const [overdue, tomorrowPasses] = await Promise.all([
+    prisma.task.findMany({
+      where: overdueWhere(todayDate),
+      include: taskInclude,
+      orderBy: [{ scheduledDate: "asc" }, { priority: "desc" }, { number: "asc" }],
+    }),
+    prisma.task.findMany({
+      where: tomorrowPassWhere(tomorrow),
+      include: taskInclude,
+      orderBy: [{ priority: "desc" }, { number: "asc" }],
+    }),
+  ]);
+  return { overdue, tomorrowPasses };
 }
 
 /** Карточка задачи с историей. Изоляция: водителю чужая задача отдаёт 404. */

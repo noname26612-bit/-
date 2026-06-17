@@ -228,7 +228,11 @@ export function CreateTaskModal({
           </Field>
           {!isEdit ? (
             <Field label="Исполнитель">
-              <Select value={form.assigneeId} onChange={(e) => set("assigneeId", e.target.value)}>
+              <Select
+                data-testid="create-assignee"
+                value={form.assigneeId}
+                onChange={(e) => set("assigneeId", e.target.value)}
+              >
                 <option value="">Не назначено</option>
                 {drivers.map((d) => (
                   <option key={d.id} value={d.id}>
@@ -307,6 +311,7 @@ export function CreateTaskModal({
               </Field>
               <Field label="Пропуск">
                 <Select
+                  data-testid="create-pass"
                   value={form.passStatus}
                   onChange={(e) => set("passStatus", e.target.value as PassStatus)}
                 >
