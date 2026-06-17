@@ -17,6 +17,7 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:kpi": "tsx prisma/seed-kpi.ts",
     "db:studio": "prisma studio",
     "prisma": "prisma",
     "postinstall": "prisma generate"
