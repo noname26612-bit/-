@@ -188,6 +188,7 @@ model PushSubscription {
 ```prisma
 enum KpiMarkKind   { LATE UNSIGNED_DOCS MISSED_STOP MANUAL } // 3 авто-метрики + ручная отметка
 enum KpiMarkStatus { CANDIDATE CONFIRMED DISMISSED }         // предложено системой → решение Милены
+enum PayoutFloor   { SALARY ZERO }                           // нижний порог итога (Артём 17.06.2026: SALARY)
 
 // Отметка KPI. Авто-кандидаты создаёт детектор (cron), решение принимает диспетчер.
 // Корректируемый реестр (не «журнал только на запись», как TaskEvent): пока месяц открыт,
@@ -227,12 +228,23 @@ model DriverPayProfile {
   updatedAt   DateTime @updatedAt
 }
 
-// Глобальный вес штрафа по виду нарушения (3 строки). Шаг прогрессии — константа KPI_CONFIG в src/domain/kpi.ts.
+// Глобальный вес штрафа по виду нарушения (3 строки). Настраивает админ в UI.
 model KpiRule {
   id       String      @id @default(uuid())
   kind     KpiMarkKind @unique
   weight   Int                         // базовый штраф ₽ за ошибку этого вида
   isActive Boolean     @default(true)
+}
+
+// Глобальные настройки расчёта (singleton). Уточнение к v1 (17.06.2026): шаг прогрессии вынесен из
+// константы в БД, т.к. админ настраивает прогрессию и порог в UI (PRD §8 экран 5). Чистая арифметика —
+// по-прежнему в src/domain/kpi.ts, но параметры берутся отсюда.
+model KpiSettings {
+  id                    String      @id @default("singleton") // ровно одна строка
+  progressionPercent    Int         @default(110)  // шаг прогрессии, % (110 = ×1.10)
+  progressionStartIndex Int         @default(3)    // с какого по счёту нарушения месяца включается прогрессия
+  floor                 PayoutFloor @default(SALARY) // нижний порог итога
+  updatedAt             DateTime    @updatedAt
 }
 
 // Снимок расчёта за закрытый месяц (неизменяем). До закрытия расчёт считается на лету из KpiMark + правил.
@@ -301,13 +313,13 @@ model PayrollStatement {
 | DELETE /api/attachments/:id | Д, В(автор, до завершения) | удалить вложение |
 | POST /api/push/subscribe | Д, В | сохранить подписку |
 | GET/POST /api/admin/users, /api/admin/task-types | А | справочники |
-| GET /api/kpi/candidates?period | Д | нарушения-кандидаты и подтверждённые за месяц (все водители) |
+| GET /api/kpi/overview?period | Д | кандидаты в нарушения + расчёт по всем водителям за месяц (объединяет candidates+statements одним запросом) |
+| POST /api/kpi/detect {date?} | Д | ручной прогон детектора кандидатов (та же логика, что ночной cron); идемпотентно |
 | POST /api/kpi/marks | Д | добавить отметку вручную (штраф или поощрение) |
 | POST /api/kpi/marks/:id/resolve {status} | Д | подтвердить/отклонить кандидата (CONFIRMED/DISMISSED) |
-| GET /api/kpi/statements?period | Д | расчёт по всем водителям за месяц |
 | POST /api/kpi/periods/:period/close | Д | закрыть месяц — заморозить снимок PayrollStatement |
 | GET /api/my/kpi?period | В | мой расчёт за месяц (driverId из сессии; чужой → 404) |
-| GET/PUT /api/admin/pay-profiles, /api/admin/kpi-rules | А | оклад/премия по водителю, веса штрафов |
+| GET/PUT /api/admin/pay-profiles, /api/admin/kpi-rules, /api/admin/kpi-settings | А | оклад/премия по водителю, веса штрафов, прогрессия/порог |
 
 Контракт ответов: `{ data }` или `{ error: { code, message } }`; коды ошибок доменные (`FORBIDDEN_TRANSITION`, `PHOTO_REQUIRED`, `NOT_FOUND`, `PERIOD_CLOSED`).
 
@@ -328,6 +340,6 @@ model PayrollStatement {
 
 ## 10. Тестирование
 
-- Unit (Vitest): статусная матрица (все разрешённые/запрещённые переходы), authz-функции, нумерация. KPI (Фаза 1.5): детекторы нарушений (опоздание/акт/точка на граничных данных), прогрессивный расчёт (0 ошибок = полная премия; убавка ниже оклада; итог не ниже 0), идемпотентность детектора.
+- Unit (Vitest): статусная матрица (все разрешённые/запрещённые переходы), authz-функции, нумерация. KPI (Фаза 1.5): детекторы нарушений (опоздание/акт/точка на граничных данных), прогрессивный расчёт (0 ошибок = полная премия; прогрессия с 3-го нарушения; штрафы максимум обнуляют премию — итог не ниже оклада; режим ZERO — не ниже 0; сверка с примером PRD §12.3), идемпотентность детектора.
 - e2e (Playwright): сценарий «Милена создала → назначила → водитель принял → выехал → на месте → фото → выполнено»; тесты изоляции (обязательно); требование фото при DONE. KPI: водитель видит только свой расчёт (чужой → 404); водительские ручки KPI не дают подтверждать/настраивать; закрытый месяц не меняется при правке отметок.
 - Definition of Done любой фичи — в CLAUDE.md.

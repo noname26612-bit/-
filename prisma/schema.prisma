@@ -63,21 +63,30 @@ model User {
   canLogin     Boolean  @default(true) // false — внешний исполнитель (Султан): входа нет, задачи на него ведёт диспетчер
   createdAt    DateTime @default(now())
 
-  tasks        Task[]      @relation("assignee")
-  createdTasks Task[]      @relation("creator")
+  tasks        Task[]             @relation("assignee")
+  createdTasks Task[]             @relation("creator")
   events       TaskEvent[]
   pushSubs     PushSubscription[] // этап 5 (web-push): подписки устройств этого пользователя
+
+  // KPI / зарплата (Фаза 1.5, ARCHITECTURE §4а)
+  kpiMarks        KpiMark[]          @relation("kpiDriver") // отметки KPI этого водителя
+  kpiCreatedMarks KpiMark[]          @relation("kpiCreatedBy") // ручные отметки, созданные этим диспетчером
+  payProfile      DriverPayProfile?  @relation("payProfile") // денежный профиль (только водители)
+  payStatements   PayrollStatement[] @relation("payStatements") // закрытые расчёты за месяцы
 }
 
 // Справочник типов задач (PRD §3). Новые типы заводит админ без правки кода.
 model TaskType {
-  id            String  @id @default(uuid())
-  name          String  @unique // «Доставка в аренду», «Забор в ремонт»...
-  icon          String? // имя иконки lucide
-  requiresPhoto Boolean @default(true) // обязательное фото при DONE (проверка на сервере — этап 4)
-  sortOrder     Int     @default(0)
-  isActive      Boolean @default(true)
-  tasks         Task[]
+  id                String  @id @default(uuid())
+  name              String  @unique // «Доставка в аренду», «Забор в ремонт»...
+  icon              String? // имя иконки lucide
+  requiresPhoto     Boolean @default(true) // обязательное фото при DONE (проверка на сервере — этап 4)
+  // Ремонтный тип: ожидается подписанный акт (документ-вложение). НЕ гейт завершения —
+  // отсутствие = нарушение KPI UNSIGNED_DOCS (Фаза 1.5, PRD §12.1). См. src/domain/kpi.ts.
+  requiresSignedDoc Boolean @default(false)
+  sortOrder         Int     @default(0)
+  isActive          Boolean @default(true)
+  tasks             Task[]
 }
 
 model Task {
@@ -118,6 +127,7 @@ model Task {
 
   events      TaskEvent[]
   attachments Attachment[]
+  kpiMarks    KpiMark[] // отметки KPI, привязанные к этой задаче (Фаза 1.5)
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -178,4 +188,108 @@ model PushSubscription {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+// ───────────────────────────── KPI и зарплата (Фаза 1.5) ─────────────────────────────
+// Модель данных — ARCHITECTURE §4а, продукт — PRD §12. Всё аддитивно поверх Фазы 1.
+// Принцип: зарплата = оклад + (премия − прогрессивные штрафы) + ручные поощрения; закрытый
+// месяц фиксируется снимком (PayrollStatement) и больше не зависит от правок отметок/правил.
+
+// Виды отметок KPI: 3 авто-метрики (детектор) + ручная отметка диспетчера.
+enum KpiMarkKind {
+  LATE // опоздание: «На месте» позже timeTo задачи (PRD §12.1)
+  UNSIGNED_DOCS // ремонтная задача завершена без подписанного акта (документ-вложения)
+  MISSED_STOP // назначенная на день точка не доведена до DONE (без переноса/отмены)
+  MANUAL // ручная отметка: штраф или поощрение (знаковая сумма в manualAmount)
+}
+
+// Жизненный цикл отметки: предложено системой → решение Милены. Ручные сразу CONFIRMED.
+enum KpiMarkStatus {
+  CANDIDATE
+  CONFIRMED
+  DISMISSED
+}
+
+// Нижний порог итога к выплате (решение Артёма, KPI-ответ 1): SALARY — штрафы максимум
+// обнуляют премию, итог не ниже оклада. ZERO — премия может уйти в минус (итог не ниже 0).
+enum PayoutFloor {
+  SALARY
+  ZERO
+}
+
+// Отметка KPI. Авто-кандидатов создаёт ночной детектор (cron), решение принимает диспетчер.
+// Корректируемый реестр (в отличие от неизменяемого TaskEvent): пока месяц открыт, статус
+// можно менять — каждое решение пишет resolvedById/resolvedAt. Закрытый месяц фиксируется
+// снимком в PayrollStatement и больше не зависит от правок отметок (PRD §12.4).
+model KpiMark {
+  id           String        @id @default(uuid())
+  driverId     String // чей KPI; изоляция водителя — по нему
+  driver       User          @relation("kpiDriver", fields: [driverId], references: [id])
+  taskId       String? // привязка к задаче (LATE/UNSIGNED_DOCS/MISSED_STOP); null — ручная общая
+  task         Task?         @relation(fields: [taskId], references: [id])
+  period       String // месяц начисления «YYYY-MM» (по occurredAt в CRON_TZ)
+  kind         KpiMarkKind
+  status       KpiMarkStatus @default(CANDIDATE)
+  occurredAt   DateTime // когда произошло — для прогрессии (порядок ошибок в месяце)
+  note         String? // автоописание / пояснение диспетчера
+  manualAmount Int? // только MANUAL: знаковая сумма ₽ (− штраф, + поощрение)
+  createdById  String? // null — авто-кандидат от системы; иначе диспетчер (ручная)
+  createdBy    User?         @relation("kpiCreatedBy", fields: [createdById], references: [id])
+  resolvedById String? // кто подтвердил/отклонил (uuid, без навигации — см. §4а)
+  resolvedAt   DateTime?
+  createdAt    DateTime      @default(now())
+
+  @@unique([taskId, kind]) // идемпотентность детектора: одна авто-отметка вида на задачу
+  @@index([driverId, period])
+  @@index([status, period])
+}
+
+// Денежный профиль водителя (оклад/премия задаёт админ). Веса штрафов — глобальные (KpiRule),
+// шаг прогрессии и нижний порог — глобальные (KpiSettings).
+model DriverPayProfile {
+  id          String   @id @default(uuid())
+  driverId    String   @unique
+  driver      User     @relation("payProfile", fields: [driverId], references: [id])
+  baseSalary  Int      @default(0) // оклад ₽/мес
+  premiumBase Int      @default(0) // премия ₽ при нуле ошибок (полная «прибавка»)
+  isActive    Boolean  @default(true)
+  updatedAt   DateTime @updatedAt
+}
+
+// Глобальный вес штрафа по виду нарушения (по строке на авто-метрику). Настраивает админ.
+model KpiRule {
+  id       String      @id @default(uuid())
+  kind     KpiMarkKind @unique
+  weight   Int // базовый штраф ₽ за ошибку этого вида (до прогрессии)
+  isActive Boolean     @default(true)
+}
+
+// Глобальные настройки расчёта (singleton, одна строка). Шаг прогрессии вынесен из константы
+// в БД, потому что админ настраивает прогрессию в UI (PRD §8 экран 5, решение Артёма). Это
+// осознанное уточнение ARCHITECTURE §4а («шаг прогрессии — константа») — зафиксировано в доке.
+model KpiSettings {
+  id                    String      @id @default("singleton") // ровно одна строка
+  progressionPercent    Int         @default(110) // шаг прогрессии, % (110 = ×1.10 на каждую следующую ошибку)
+  progressionStartIndex Int         @default(3) // с какого по счёту нарушения месяца включается прогрессия
+  floor                 PayoutFloor @default(SALARY) // нижний порог итога (решение Артёма)
+  updatedAt             DateTime    @updatedAt
+}
+
+// Снимок расчёта за закрытый месяц (неизменяем). До закрытия расчёт считается на лету из
+// CONFIRMED-отметок + правил + настроек. После закрытия — отдаётся этот снимок (PRD §12.4).
+model PayrollStatement {
+  id          String   @id @default(uuid())
+  driverId    String
+  driver      User     @relation("payStatements", fields: [driverId], references: [id])
+  period      String // «YYYY-MM»
+  baseSalary  Int // снимок оклада
+  premiumBase Int // снимок премии
+  penalty     Int // сумма штрафов (положительное число)
+  bonus       Int // сумма ручных поощрений
+  total       Int // итог к выплате (не ниже нижнего порога)
+  breakdown   Json // детализация по отметкам на момент закрытия
+  closedById  String // кто закрыл (uuid, без навигации)
+  closedAt    DateTime @default(now())
+
+  @@unique([driverId, period])
 }

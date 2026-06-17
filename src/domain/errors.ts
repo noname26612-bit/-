@@ -25,4 +25,6 @@ export const Errors = {
     new DomainError("PAYMENT_REQUIRED", "Подтвердите получение денег", 422),
   uploadInvalid: (message: string) => new DomainError("UPLOAD_INVALID", message, 422),
   validation: (message: string) => new DomainError("VALIDATION", message, 422),
+  periodClosed: () =>
+    new DomainError("PERIOD_CLOSED", "Месяц закрыт — расчёт зафиксирован и не меняется", 409),
 };

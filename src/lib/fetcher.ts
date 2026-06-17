@@ -35,7 +35,7 @@ export async function fetcher<T>(url: string): Promise<T> {
 /** Отправка мутации (POST/PATCH/DELETE). Возвращает data или бросает ApiError. */
 export async function apiSend<T = unknown>(
   url: string,
-  method: "POST" | "PATCH" | "DELETE",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   body?: unknown,
 ): Promise<T> {
   let res: Response;
