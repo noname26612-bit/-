@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { requireRole } from "@/lib/session";
 import { AppHeader } from "@/components/app-header";
+import { PwaControls } from "@/components/pwa-controls";
 
 // PWA водителя — узкая колонка под телефон. Guard: только роль DRIVER.
 export default async function DriverLayout({ children }: { children: ReactNode }) {
@@ -8,6 +9,7 @@ export default async function DriverLayout({ children }: { children: ReactNode }
   return (
     <div className="mx-auto min-h-screen max-w-md bg-white">
       <AppHeader name={user.name} role={user.role} />
+      <PwaControls />
       {children}
     </div>
   );

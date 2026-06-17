@@ -9,6 +9,7 @@ import { canViewTask } from "./authz";
 import { myTasksWhere, type MyTasksScope } from "./my-tasks";
 import { isReportPhotoMissing } from "./attachments";
 import { Errors } from "./errors";
+import { notifyTaskAssignee } from "@/lib/push";
 
 export type Actor = { id: string; role: Role };
 
@@ -196,7 +197,7 @@ export async function createTask(
   }
   const status: TaskStatus = assigneeId ? "ASSIGNED" : "NEW";
 
-  return prisma.$transaction(async (tx) => {
+  const created = await prisma.$transaction(async (tx) => {
     const task = await tx.task.create({
       data: {
         typeId,
@@ -235,6 +236,9 @@ export async function createTask(
     });
     return task;
   });
+  // Пуш назначенному водителю (PRD §7). notifyTaskAssignee — no-op, если задача не назначена.
+  notifyTaskAssignee(created, "assigned", actor.id);
+  return created;
 }
 
 export async function updateTaskFields(
@@ -279,13 +283,15 @@ export async function updateTaskFields(
   if (fields.passStatus !== undefined) data.passStatus = fields.passStatus;
   if (fields.priority !== undefined) data.priority = fields.priority;
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const updated = await tx.task.update({ where: { id: taskId }, data, include: taskInclude });
     await tx.taskEvent.create({
       data: { taskId, actorId: actor.id, kind: "edit", comment: "Изменены поля задачи" },
     });
     return updated;
   });
+  notifyTaskAssignee(result, "changed", actor.id);
+  return result;
 }
 
 export async function assignTask(
@@ -310,7 +316,7 @@ export async function assignTask(
   if (assigneeId && task.status === "NEW") status = "ASSIGNED";
   if (!assigneeId && task.status === "ASSIGNED") status = "NEW";
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const updated = await tx.task.update({
       where: { id: taskId },
       data: { assigneeId, status },
@@ -328,6 +334,9 @@ export async function assignTask(
     });
     return updated;
   });
+  // Назначение → пуш новому исполнителю; снятие назначения (assigneeId=null) — no-op.
+  notifyTaskAssignee(result, "assigned", actor.id);
+  return result;
 }
 
 export type TransitionOptions = {
@@ -381,7 +390,7 @@ export async function transitionTask(
   if (toStatus === "DONE") data.completedAt = new Date();
   if (task.status === "ON_HOLD" && toStatus === "ASSIGNED") data.holdReason = null;
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const updated = await tx.task.update({ where: { id: taskId }, data, include: taskInclude });
     await tx.taskEvent.create({
       data: {
@@ -411,6 +420,9 @@ export async function transitionTask(
     }
     return updated;
   });
+  // Отмена диспетчером → пуш водителю (PRD §7). Движение статуса вперёд самим водителем не шлём.
+  if (toStatus === "CANCELLED") notifyTaskAssignee(result, "cancelled", actor.id);
+  return result;
 }
 
 export async function rescheduleTask(
@@ -433,7 +445,7 @@ export async function rescheduleTask(
   // «Перенесена» возвращает задачу в «Назначена» на новую дату (PRD §5), снимая паузу.
   const status: TaskStatus = task.assigneeId ? "ASSIGNED" : "NEW";
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const updated = await tx.task.update({
       where: { id: taskId },
       data: { scheduledDate: date, status, holdReason: null },
@@ -451,6 +463,8 @@ export async function rescheduleTask(
     });
     return updated;
   });
+  notifyTaskAssignee(result, "rescheduled", actor.id);
+  return result;
 }
 
 export async function addComment(

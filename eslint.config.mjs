@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Сгенерированный код (Prisma client) — не линтуем.
     "src/generated/**",
+    // Service worker (Этап 5) — рантайм-глобали self/clients, отдаётся как статика.
+    "public/sw.js",
   ]),
 ]);
 
