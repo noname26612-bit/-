@@ -38,7 +38,9 @@ export async function PATCH(req: Request, { params }: Ctx) {
       const a = body.assigneeId;
       const assigneeId = a === null ? null : typeof a === "string" ? a : undefined;
       if (assigneeId === undefined) throw Errors.validation("Не указан исполнитель");
-      return NextResponse.json(ok(await assignTask(id, assigneeId, user)));
+      // `today` — дата клиента для авто-простановки при назначении задачи без даты (п.1).
+      const today = typeof body.today === "string" ? body.today : undefined;
+      return NextResponse.json(ok(await assignTask(id, assigneeId, user, { today })));
     }
     if (op === "reschedule") {
       const date = typeof body.scheduledDate === "string" ? body.scheduledDate : "";

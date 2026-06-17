@@ -66,11 +66,10 @@ export function BoardClient({
       if (target.kind === "undated") {
         await apiSend(`/api/tasks/${taskId}`, "PATCH", { op: "edit", scheduledDate: null });
       } else {
-        if (!task.scheduledDate) {
-          await apiSend(`/api/tasks/${taskId}`, "PATCH", { op: "edit", scheduledDate: today });
-        }
+        // Авто-простановку даты при назначении задачи без даты делает сервер (assignTask, п.1):
+        // одна ручка, today передаём для корректной локальной даты.
         const assigneeId = target.kind === "driver" ? target.driverId : null;
-        await apiSend(`/api/tasks/${taskId}`, "PATCH", { op: "assign", assigneeId });
+        await apiSend(`/api/tasks/${taskId}`, "PATCH", { op: "assign", assigneeId, today });
       }
       await refresh();
     } catch (e) {
@@ -81,7 +80,11 @@ export function BoardClient({
   async function quickAssign(taskId: string, assigneeId: string) {
     setActionError(null);
     try {
-      await apiSend(`/api/tasks/${taskId}`, "PATCH", { op: "assign", assigneeId: assigneeId || null });
+      await apiSend(`/api/tasks/${taskId}`, "PATCH", {
+        op: "assign",
+        assigneeId: assigneeId || null,
+        today,
+      });
       await refresh();
     } catch (e) {
       setActionError((e as Error).message);
@@ -325,8 +328,9 @@ function Column({
   onQuickAssign: (taskId: string, assigneeId: string) => void;
 }) {
   const [over, setOver] = useState(false);
+  const testId = target.kind === "driver" ? `col-driver-${target.driverId}` : `col-${target.kind}`;
   return (
-    <div className="flex w-72 shrink-0 flex-col">
+    <div className="flex w-72 shrink-0 flex-col" data-testid={testId}>
       <div className="mb-2 flex items-baseline justify-between px-1">
         <span className="text-sm font-semibold text-neutral-800">{title}</span>
         <span className="text-xs text-neutral-400">
