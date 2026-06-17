@@ -2,9 +2,10 @@
 // Пароль берём из SEED_PASSWORD (см. .env.example) — в коде паролей нет (CLAUDE.md правило 5).
 // Запуск: `pnpm db:seed` (нужен поднятый Postgres и применённые миграции).
 import "dotenv/config";
-import { PrismaClient, type Role, type KpiMarkKind } from "@/generated/prisma/client";
+import { PrismaClient, type Role } from "@/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { hashPassword } from "@/lib/password";
+import { seedKpi } from "./seed-kpi";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -53,28 +54,8 @@ const TASK_TYPES: { name: string; icon: string; requiresPhoto: boolean; requires
   { name: "Прочее", icon: "ellipsis", requiresPhoto: false, requiresSignedDoc: false },
 ];
 
-// ── KPI / зарплата (Фаза 1.5) — дефолты-заглушки. Реальные суммы Артём настраивает в UI (PRD §12.5).
-// Числа зафиксированы Артёмом 17.06.2026 (см. CLAUDE.md / задача Этапа 9), не секреты — это
-// бизнес-настройки, стартовые значения. Веса штрафов — глобальные (KpiRule).
-const KPI_RULES: { kind: KpiMarkKind; weight: number }[] = [
-  { kind: "LATE", weight: 500 }, // опоздание
-  { kind: "MISSED_STOP", weight: 500 }, // невыполненная точка
-  { kind: "UNSIGNED_DOCS", weight: 1000 }, // без подписанного акта
-];
-
-// Денежный профиль каждого штатного водителя: оклад + премия при нуле ошибок.
-const PAY_PROFILES: { login: string; baseSalary: number; premiumBase: number }[] = [
-  { login: "kashirskiy", baseSalary: 70_000, premiumBase: 40_000 },
-  { login: "pisarev", baseSalary: 70_000, premiumBase: 40_000 },
-];
-
-// Глобальные настройки расчёта (singleton): прогрессия ×1.10 начиная с 3-й ошибки месяца;
-// нижний порог итога = оклад (штрафы максимум обнуляют премию) — решение Артёма.
-const KPI_SETTINGS = {
-  progressionPercent: 110,
-  progressionStartIndex: 3,
-  floor: "SALARY" as const,
-};
+// KPI / зарплата (Фаза 1.5): дефолты и логика — в prisma/seed-kpi.ts (там же безопасный
+// прод-сид `pnpm db:seed:kpi`, не трогающий пользователей). Здесь только вызываем seedKpi().
 
 // Пароль учётки: индивидуальный SEED_PASSWORD_<LOGIN> (если задан) приоритетнее общего SEED_PASSWORD.
 // На локалке достаточно общего; на проде Артём может задать каждому свой (см. deploy/.env.prod.example).
@@ -115,44 +96,7 @@ async function main(defaultPassword: string): Promise<void> {
   }
   console.log(`  ✓ типы задач: ${TASK_TYPES.length}`);
 
-  await seedKpi();
-}
-
-// KPI / зарплата (Фаза 1.5). Идемпотентно: upsert по kind/driverId/singleton.
-// Только дефолты-заглушки — не перетираем суммы, если Артём уже настроил их в UI: при повторном
-// сиде веса/оклады/настройки выставляются только при СОЗДАНИИ (update — пустой), кроме привязки.
-async function seedKpi(): Promise<void> {
-  for (const r of KPI_RULES) {
-    await prisma.kpiRule.upsert({
-      where: { kind: r.kind },
-      update: {}, // не перетираем настроенный вес
-      create: { kind: r.kind, weight: r.weight, isActive: true },
-    });
-  }
-  console.log(`  ✓ KPI-правила (веса штрафов): ${KPI_RULES.length}`);
-
-  for (const p of PAY_PROFILES) {
-    const driver = await prisma.user.findUnique({ where: { login: p.login }, select: { id: true } });
-    if (!driver) continue;
-    await prisma.driverPayProfile.upsert({
-      where: { driverId: driver.id },
-      update: {}, // не перетираем настроенные оклад/премию
-      create: { driverId: driver.id, baseSalary: p.baseSalary, premiumBase: p.premiumBase, isActive: true },
-    });
-  }
-  console.log(`  ✓ денежные профили водителей: ${PAY_PROFILES.length}`);
-
-  await prisma.kpiSettings.upsert({
-    where: { id: "singleton" },
-    update: {}, // не перетираем настроенную прогрессию/порог
-    create: {
-      id: "singleton",
-      progressionPercent: KPI_SETTINGS.progressionPercent,
-      progressionStartIndex: KPI_SETTINGS.progressionStartIndex,
-      floor: KPI_SETTINGS.floor,
-    },
-  });
-  console.log("  ✓ настройки расчёта KPI (прогрессия, порог)");
+  await seedKpi(prisma);
 }
 
 main(seedPassword)
