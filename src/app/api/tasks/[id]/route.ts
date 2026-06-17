@@ -6,6 +6,7 @@ import {
   updateTaskFields,
   assignTask,
   rescheduleTask,
+  planTask,
 } from "@/domain/task-service";
 import { parseTaskFields } from "@/lib/task-input";
 import { Errors } from "@/domain/errors";
@@ -46,6 +47,18 @@ export async function PATCH(req: Request, { params }: Ctx) {
       const date = typeof body.scheduledDate === "string" ? body.scheduledDate : "";
       const comment = typeof body.comment === "string" ? body.comment : undefined;
       return NextResponse.json(ok(await rescheduleTask(id, date, user, comment)));
+    }
+    if (op === "plan") {
+      // Перетаскивание в ячейку сетки «Планирование»: дата (столбец) + водитель (строка).
+      const scheduledDate =
+        body.scheduledDate === null || typeof body.scheduledDate === "string"
+          ? (body.scheduledDate as string | null)
+          : null;
+      const assigneeId =
+        body.assigneeId === null || typeof body.assigneeId === "string"
+          ? (body.assigneeId as string | null)
+          : null;
+      return NextResponse.json(ok(await planTask(id, { scheduledDate, assigneeId }, user)));
     }
     const fields = parseTaskFields(body);
     return NextResponse.json(ok(await updateTaskFields(id, fields, user)));

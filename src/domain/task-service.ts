@@ -394,6 +394,80 @@ export async function assignTask(
   return result;
 }
 
+/**
+ * Планирование задачи на сетке «Планирование» (п.3): атомарно задаёт дату И исполнителя
+ * (перетаскивание в ячейку «день × водитель»). Дата — edit-поле, назначение — ось NEW↔ASSIGNED
+ * (как assignTask), матрица статусов не обходится. Пишет осмысленные события за реальные изменения.
+ */
+export async function planTask(
+  taskId: string,
+  input: { scheduledDate: string | null; assigneeId: string | null },
+  actor: Actor,
+): Promise<TaskListItem> {
+  if (!isDispatcherRole(actor.role)) throw Errors.forbidden();
+  const task = await prisma.task.findUnique({ where: { id: taskId } });
+  if (!task) throw Errors.notFound();
+  if (task.status === "DONE" || task.status === "CANCELLED") throw Errors.invalidTransition();
+
+  const newDate = parseDate(input.scheduledDate);
+  const assigneeId = input.assigneeId ?? null;
+
+  let name = "";
+  if (assigneeId) {
+    await assertAssignableDriver(assigneeId);
+    const u = await prisma.user.findUnique({ where: { id: assigneeId }, select: { name: true } });
+    name = u?.name ?? "";
+  }
+
+  // Статус по оси назначения (как в assignTask): NEW↔ASSIGNED, прочие статусы не трогаем.
+  let status = task.status;
+  if (assigneeId && task.status === "NEW") status = "ASSIGNED";
+  if (!assigneeId && task.status === "ASSIGNED") status = "NEW";
+
+  const dateKey = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+  const dateChanged = dateKey(task.scheduledDate) !== dateKey(newDate);
+  const assigneeChanged = (task.assigneeId ?? null) !== assigneeId;
+
+  const result = await prisma.$transaction(async (tx) => {
+    const updated = await tx.task.update({
+      where: { id: taskId },
+      data: { scheduledDate: newDate, assigneeId, status },
+      include: taskInclude,
+    });
+    if (dateChanged) {
+      await tx.taskEvent.create({
+        data: {
+          taskId,
+          actorId: actor.id,
+          kind: "reschedule",
+          fromStatus: task.status,
+          toStatus: status,
+          comment: newDate
+            ? `Запланирована на ${dateKey(newDate)}`
+            : "Дата снята (пул «Без даты»)",
+        },
+      });
+    }
+    if (assigneeChanged) {
+      await tx.taskEvent.create({
+        data: {
+          taskId,
+          actorId: actor.id,
+          kind: "assign",
+          fromStatus: task.status,
+          toStatus: status,
+          comment: assigneeId ? `Назначен: ${name}` : "Снято назначение",
+        },
+      });
+    }
+    return updated;
+  });
+  // Пуш новому исполнителю при назначении/смене (no-op, если назначения нет).
+  if (assigneeChanged) notifyTaskAssignee(result, "assigned", actor.id);
+  else if (dateChanged) notifyTaskAssignee(result, "rescheduled", actor.id);
+  return result;
+}
+
 export type TransitionOptions = {
   comment?: string | null;
   reason?: string | null;
