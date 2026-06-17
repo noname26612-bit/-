@@ -7,6 +7,7 @@ import { cn } from "@/lib/cn";
 const LINKS = [
   { href: "/board", label: "Сегодня" },
   { href: "/tasks", label: "Все задачи" },
+  { href: "/kpi", label: "KPI / Зарплата" },
 ];
 
 export function DispatcherNav({ showAdmin }: { showAdmin: boolean }) {

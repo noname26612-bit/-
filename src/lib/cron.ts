@@ -3,6 +3,7 @@
 // задачи задвоятся (deploy-release: не запускать в кластере/нескольких репликах).
 import cron from "node-cron";
 import { runMorningReminders, runPassWarnings } from "@/domain/push-service";
+import { runKpiDetection } from "@/domain/kpi-service";
 
 const TZ = process.env.CRON_TZ ?? "Europe/Moscow";
 const g = globalThis as typeof globalThis & { __vanmarkCronStarted?: boolean };
@@ -26,7 +27,8 @@ if (!g.__vanmarkCronStarted) {
   g.__vanmarkCronStarted = true;
   schedule("morning-reminder", "0 8 * * *", runMorningReminders); // 08:00 — водителям
   schedule("pass-warning", "0 16 * * *", runPassWarnings); // 16:00 — диспетчеру про пропуска
-  console.log(`[cron] scheduled 08:00 + 16:00 (${TZ})`);
+  schedule("kpi-detector", "30 23 * * *", runKpiDetection); // 23:30 — кандидаты в нарушения KPI (Фаза 1.5)
+  console.log(`[cron] scheduled 08:00 + 16:00 + 23:30 (${TZ})`);
 }
 
 export {};

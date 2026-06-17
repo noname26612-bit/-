@@ -112,3 +112,22 @@ export function todayISO(): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
+
+const MONTHS_RU = [
+  "январь", "февраль", "март", "апрель", "май", "июнь",
+  "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
+];
+
+/** Период «YYYY-MM» → «июнь 2026» (для KPI/зарплаты). */
+export function formatPeriod(period: string): string {
+  const [y, m] = period.split("-").map(Number);
+  if (!y || !m || m < 1 || m > 12) return period;
+  return `${MONTHS_RU[m - 1]} ${y}`;
+}
+
+/** Сдвиг периода «YYYY-MM» на delta месяцев (для переключателя месяца). */
+export function shiftPeriod(period: string, delta: number): string {
+  const [y, m] = period.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}

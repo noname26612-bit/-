@@ -10,6 +10,7 @@ export default function AdminPage() {
         <AdminLink href="/board" title="Доска «Сегодня»" desc="Задачи дня по водителям" />
         <AdminLink href="/tasks" title="Все задачи" desc="Таблица с фильтрами и поиском" />
         <AdminLink href="/admin/task-types" title="Типы задач" desc="Справочник: названия, фото, порядок" />
+        <AdminLink href="/admin/pay" title="Оплата (KPI)" desc="Оклады, премии, веса штрафов, прогрессия" />
       </div>
     </main>
   );
