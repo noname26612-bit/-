@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
 import type { PassStatus, PaymentType, Role, TaskStatus } from "@/generated/prisma/enums";
 import { checkTransition, isDispatcherRole } from "./task-status";
+import { resolveAssignedDate } from "./assign-date";
 import { canViewTask } from "./authz";
 import { myTasksWhere, type MyTasksScope } from "./my-tasks";
 import { overdueWhere, tomorrowPassWhere } from "./attention";
@@ -330,6 +331,7 @@ export async function assignTask(
   taskId: string,
   assigneeId: string | null,
   actor: Actor,
+  opts: { today?: string } = {},
 ): Promise<TaskListItem> {
   if (!isDispatcherRole(actor.role)) throw Errors.forbidden();
   const task = await prisma.task.findUnique({ where: { id: taskId } });
@@ -348,10 +350,15 @@ export async function assignTask(
   if (assigneeId && task.status === "NEW") status = "ASSIGNED";
   if (!assigneeId && task.status === "ASSIGNED") status = "NEW";
 
+  // п.1: назначение задачи БЕЗ даты на водителя автоматически ставит сегодняшнюю дату.
+  // `today` — локальная дата клиента «YYYY-MM-DD»; если не передана, берём дату сервера (UTC) как запас.
+  const today = parseDate(opts.today) ?? parseDate(new Date().toISOString().slice(0, 10));
+  const autoDate = resolveAssignedDate(task.scheduledDate, assigneeId, today);
+
   const result = await prisma.$transaction(async (tx) => {
     const updated = await tx.task.update({
       where: { id: taskId },
-      data: { assigneeId, status },
+      data: { assigneeId, status, ...(autoDate ? { scheduledDate: autoDate } : {}) },
       include: taskInclude,
     });
     await tx.taskEvent.create({
@@ -364,6 +371,17 @@ export async function assignTask(
         comment: assigneeId ? `Назначен: ${name}` : "Снято назначение",
       },
     });
+    // Отдельная неизменяемая отметка в журнал об авто-простановке даты (CLAUDE.md правило 3).
+    if (autoDate) {
+      await tx.taskEvent.create({
+        data: {
+          taskId,
+          actorId: actor.id,
+          kind: "auto_date",
+          comment: `Дата проставлена автоматически при назначении: ${autoDate.toISOString().slice(0, 10)}`,
+        },
+      });
+    }
     return updated;
   });
   // Назначение → пуш новому исполнителю; снятие назначения (assigneeId=null) — no-op.

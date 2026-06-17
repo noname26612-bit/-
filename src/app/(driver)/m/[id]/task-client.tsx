@@ -40,6 +40,7 @@ const KIND_LABEL: Record<string, string> = {
   assign: "Назначение",
   edit: "Изменение",
   reschedule: "Перенос",
+  auto_date: "Дата",
   comment: "Комментарий",
   payment_received: "Оплата",
 };

@@ -108,6 +108,7 @@ export function CreateTaskModal({
     editTask ? formFromTask(editTask) : emptyForm(firstType, defaultDate),
   );
   const [showAll, setShowAll] = useState(isEdit);
+  const [noDate, setNoDate] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -222,9 +223,28 @@ export function CreateTaskModal({
           <Field label="Дата">
             <Input
               type="date"
+              data-testid="create-date"
               value={form.scheduledDate}
+              disabled={noDate}
               onChange={(e) => set("scheduledDate", e.target.value)}
             />
+            {!isEdit ? (
+              <label className="mt-1.5 flex items-center gap-2 text-sm text-neutral-600">
+                <input
+                  type="checkbox"
+                  data-testid="create-no-date"
+                  checked={noDate}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setNoDate(on);
+                    // Снимаем дату при включении; при выключении возвращаем дефолт (обычно — сегодня).
+                    set("scheduledDate", on ? "" : defaultDate);
+                  }}
+                  className="h-4 w-4"
+                />
+                Не указывать дату (пул «Без даты»)
+              </label>
+            ) : null}
           </Field>
           {!isEdit ? (
             <Field label="Исполнитель">
