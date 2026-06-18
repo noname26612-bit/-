@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addDaysISO } from "./task-ui";
+import { addDaysISO, STATUS_BADGE, STATUS_BAR, PASS_BADGE, STATUS_LABEL } from "./task-ui";
 
 describe("addDaysISO (горизонт доски/планирования)", () => {
   it("прибавляет дни внутри месяца", () => {
@@ -20,5 +20,50 @@ describe("addDaysISO (горизонт доски/планирования)", ()
 
   it("некорректная строка возвращается как есть", () => {
     expect(addDaysISO("не дата", 2)).toBe("не дата");
+  });
+});
+
+describe("палитра статусов (спокойная, редизайн 18.06)", () => {
+  const statuses = Object.keys(STATUS_LABEL) as (keyof typeof STATUS_LABEL)[];
+  const neutral = ["NEW", "ASSIGNED", "ACCEPTED", "EN_ROUTE", "ON_SITE", "RESCHEDULED"] as const;
+
+  it("каждый статус покрыт во всех картах", () => {
+    for (const s of statuses) {
+      expect(STATUS_BADGE[s]).toBeTruthy();
+      expect(STATUS_BAR[s]).toBeTruthy();
+    }
+  });
+
+  it("метки контурные — без заливок и таблеток (border, не bg-/rounded-full)", () => {
+    for (const s of statuses) {
+      expect(STATUS_BADGE[s]).toContain("border");
+      expect(STATUS_BADGE[s]).not.toContain("bg-");
+    }
+  });
+
+  it("цвет = смысл: зелёный=готово, красный=сорвано, янтарь=внимание", () => {
+    expect(STATUS_BAR.DONE).toContain("green");
+    expect(STATUS_BADGE.DONE).toContain("green");
+    expect(STATUS_BAR.CANCELLED).toContain("red");
+    expect(STATUS_BADGE.CANCELLED).toContain("red");
+    expect(STATUS_BAR.ON_HOLD).toContain("amber");
+    expect(STATUS_BADGE.ON_HOLD).toContain("amber");
+  });
+
+  it("нейтральные статусы — графит без «радужных» цветов", () => {
+    for (const s of neutral) {
+      expect(STATUS_BADGE[s]).toContain("slate");
+      expect(STATUS_BADGE[s]).not.toMatch(/green|red|amber|blue|violet|indigo|orange|sky/);
+      expect(STATUS_BAR[s]).not.toMatch(/violet|indigo|blue|orange|sky/);
+    }
+  });
+
+  it("пропуск: нужен — янтарный сигнал, заказан — спокойный графит, оба контурные", () => {
+    expect(PASS_BADGE.NEEDED).toContain("amber");
+    expect(PASS_BADGE.NEEDED).toContain("border");
+    // «Заказан» больше не зелёный — вопрос закрыт, подсвечивать нечего.
+    expect(PASS_BADGE.ORDERED).toContain("slate");
+    expect(PASS_BADGE.ORDERED).not.toMatch(/green|amber|red/);
+    expect(PASS_BADGE.ORDERED).toContain("border");
   });
 });

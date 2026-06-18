@@ -1,5 +1,10 @@
 // Подписи, цвета и форматтеры для интерфейса задач. Цвета статусов — строго из ui-guidelines.
 // Классы записаны строками-литералами, чтобы Tailwind их увидел и сгенерировал.
+//
+// Палитра «спокойная» (редизайн 18.06, решение Артёма): уходим от радуги из 9 цветов к графитовой
+// базе с тремя смысловыми акцентами — зелёный = готово (Выполнена), красный = сорвано (Отменена),
+// янтарный = требует внимания сейчас (Ждёт / нужен пропуск). Все остальные статусы — нейтральный
+// графит, различаются словом-подписью. Бейджи контурные (border + text), без заливок и «таблеток».
 import type { PassStatus, PaymentType, TaskStatus } from "@/generated/prisma/enums";
 
 export const STATUS_LABEL: Record<TaskStatus, string> = {
@@ -14,30 +19,32 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
   CANCELLED: "Отменена",
 };
 
-// Бейдж статуса (фон + текст).
+// Бейдж статуса — контурная метка (рамка + текст, прозрачный фон). Графит для нейтральных,
+// акцент только у «готово» (зелёный), «сорвано» (красный) и «внимание» (янтарь).
 export const STATUS_BADGE: Record<TaskStatus, string> = {
-  NEW: "bg-slate-100 text-slate-700",
-  ASSIGNED: "bg-violet-100 text-violet-700",
-  ACCEPTED: "bg-indigo-100 text-indigo-700",
-  EN_ROUTE: "bg-blue-100 text-blue-700",
-  ON_SITE: "bg-orange-100 text-orange-700",
-  DONE: "bg-green-100 text-green-700",
-  ON_HOLD: "bg-amber-100 text-amber-800",
-  RESCHEDULED: "bg-sky-100 text-sky-700",
-  CANCELLED: "bg-red-100 text-red-700",
+  NEW: "border border-slate-300 text-slate-600",
+  ASSIGNED: "border border-slate-300 text-slate-600",
+  ACCEPTED: "border border-slate-300 text-slate-600",
+  EN_ROUTE: "border border-slate-300 text-slate-600",
+  ON_SITE: "border border-slate-300 text-slate-600",
+  DONE: "border border-green-600 text-green-700",
+  ON_HOLD: "border border-amber-500 text-amber-700",
+  RESCHEDULED: "border border-slate-300 text-slate-600",
+  CANCELLED: "border border-red-600 text-red-700",
 };
 
-// Левая цветная полоса карточки.
+// Левая полоса-«корешок» карточки. Нейтральный графит для большинства; цвет загорается только
+// у трёх смысловых состояний (готово / сорвано / внимание).
 export const STATUS_BAR: Record<TaskStatus, string> = {
-  NEW: "bg-slate-400",
-  ASSIGNED: "bg-violet-500",
-  ACCEPTED: "bg-indigo-500",
-  EN_ROUTE: "bg-blue-500",
-  ON_SITE: "bg-orange-500",
+  NEW: "bg-slate-300",
+  ASSIGNED: "bg-slate-300",
+  ACCEPTED: "bg-slate-300",
+  EN_ROUTE: "bg-slate-300",
+  ON_SITE: "bg-slate-300",
   DONE: "bg-green-600",
-  ON_HOLD: "bg-amber-500",
-  RESCHEDULED: "bg-sky-400",
-  CANCELLED: "bg-red-500",
+  ON_HOLD: "bg-amber-600",
+  RESCHEDULED: "bg-slate-300",
+  CANCELLED: "bg-red-600",
 };
 
 export const PASS_LABEL: Record<PassStatus, string> = {
@@ -46,10 +53,12 @@ export const PASS_LABEL: Record<PassStatus, string> = {
   ORDERED: "Пропуск заказан",
 };
 
+// Пропуск: «нужен» — янтарный сигнал внимания; «заказан» — спокойный графит (вопрос закрыт,
+// подсвечивать нечего). Контурные.
 export const PASS_BADGE: Record<PassStatus, string> = {
-  NOT_NEEDED: "bg-neutral-100 text-neutral-500",
-  NEEDED: "bg-amber-100 text-amber-800",
-  ORDERED: "bg-green-100 text-green-700",
+  NOT_NEEDED: "border border-slate-300 text-slate-500",
+  NEEDED: "border border-amber-500 text-amber-700",
+  ORDERED: "border border-slate-300 text-slate-600",
 };
 
 export const PAYMENT_LABEL: Record<PaymentType, string> = {
