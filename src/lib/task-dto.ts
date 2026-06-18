@@ -89,6 +89,7 @@ export type WorkItemDTO = {
   catalogItemId: string | null;
   name: string;
   quantity: number;
+  price: number | null; // цена за единицу, ₽ (этап 13): null пока не расценено
   sortOrder: number;
   createdById: string;
   createdAt: string;

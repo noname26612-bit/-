@@ -86,6 +86,7 @@ const taskDetailInclude = {
       catalogItemId: true,
       name: true,
       quantity: true,
+      price: true,
       sortOrder: true,
       createdById: true,
       createdAt: true,

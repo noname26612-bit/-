@@ -7,6 +7,7 @@ import webpush, { type WebPushError } from "web-push";
 import { prisma } from "@/lib/prisma";
 import {
   buildTaskPayload,
+  buildPricingRequestPayload,
   type PushPayload,
   type TaskNotifyKind,
   type NotifiableTask,
@@ -83,4 +84,19 @@ export function notifyTaskAssignee(
 ): void {
   if (!task.assigneeId || task.assigneeId === actorId) return;
   void sendPushToUser(task.assigneeId, buildTaskPayload(task, kind)).catch(() => {});
+}
+
+/**
+ * Уведомить диспетчеров/админов, что водитель отправил ведомость на расценку (этап 13, PRD §13.1).
+ * Шлём всем активным диспетчерам/админам с возможностью входа (fire-and-forget, после коммита).
+ */
+export function notifyDispatchers(task: NotifiableTask): void {
+  void (async () => {
+    const dispatchers = await prisma.user.findMany({
+      where: { role: { in: ["DISPATCHER", "ADMIN"] }, isActive: true, canLogin: true },
+      select: { id: true },
+    });
+    const payload = buildPricingRequestPayload(task);
+    await Promise.allSettled(dispatchers.map((d) => sendPushToUser(d.id, payload)));
+  })().catch(() => {});
 }

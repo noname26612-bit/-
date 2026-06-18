@@ -176,11 +176,12 @@ model Attachment {
 
 // Ведомость работ (этап 12, PRD §13). Водитель фиксирует работы без цен — цену ставит диспетчер (этап 13).
 model WorkCatalogItem {                     // справочник работ (наполняет админ)
-  id        String     @id @default(uuid())
-  name      String     @unique
-  isActive  Boolean    @default(true)
-  sortOrder Int        @default(0)
-  workItems WorkItem[]
+  id           String     @id @default(uuid())
+  name         String     @unique
+  defaultPrice Int?                          // подсказка цены за единицу, ₽ (этап 13)
+  isActive     Boolean    @default(true)
+  sortOrder    Int        @default(0)
+  workItems    WorkItem[]
 }
 
 model WorkItem {                            // позиция ведомости: работа + количество (цена — этап 13)
@@ -191,6 +192,7 @@ model WorkItem {                            // позиция ведомости
   catalogItem   WorkCatalogItem? @relation(fields: [catalogItemId], references: [id])
   name          String                      // снимок названия работы
   quantity      Int              @default(1)
+  price         Int?                         // цена за единицу, ₽ (этап 13): null пока диспетчер не расценил
   sortOrder     Int              @default(0)
   createdById   String                      // водитель, заполнивший позицию
   createdAt     DateTime         @default(now())
@@ -343,7 +345,9 @@ model PayrollStatement {
 | GET/POST /api/admin/users, /api/admin/task-types | А | справочники |
 | GET /api/work-catalog | Д, В | справочник работ для ведомости (этап 12) |
 | POST /api/tasks/:id/work-items · PATCH/DELETE /api/work-items/:id | В(своя), Д | позиции ведомости (этап 12; правка пока DRAFT, чужая → 404) |
-| POST /api/tasks/:id/worksheet/submit | В(своя), Д | отправить ведомость на расценку (DRAFT→PRICING) |
+| POST /api/tasks/:id/worksheet/submit | В(своя), Д | отправить ведомость на расценку (DRAFT→PRICING) + пуш диспетчерам |
+| POST /api/tasks/:id/worksheet/pricing | Д | проставить цены по позициям и подтвердить расценку (PRICING→PRICED) (этап 13) |
+| GET /api/worksheets/pricing | Д | очередь ведомостей «на расценке» (этап 13) |
 | GET/POST /api/admin/work-catalog · PATCH /api/admin/work-catalog/:id | А | справочник работ |
 | GET /api/kpi/overview?period | Д | кандидаты в нарушения + расчёт по всем водителям за месяц (объединяет candidates+statements одним запросом) |
 | GET /api/summary/overview?granularity&date | Д | сводка по водителям за период (день/неделя/месяц, по дате закрытия задач) — Фаза 2, только чтение |

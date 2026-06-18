@@ -199,12 +199,13 @@ model Attachment {
 
 // Справочник работ для ведомости (этап 12, PRD §13.3). Наполняет админ. Цены-подсказки — этап 13.
 model WorkCatalogItem {
-  id        String     @id @default(uuid())
-  name      String     @unique // «Диагностика», «Замена ножа»...
-  isActive  Boolean    @default(true)
-  sortOrder Int        @default(0)
-  createdAt DateTime   @default(now())
-  workItems WorkItem[]
+  id           String     @id @default(uuid())
+  name         String     @unique // «Диагностика», «Замена ножа»...
+  defaultPrice Int? // подсказка цены за единицу, ₽ (этап 13); диспетчер правит при расценке
+  isActive     Boolean    @default(true)
+  sortOrder    Int        @default(0)
+  createdAt    DateTime   @default(now())
+  workItems    WorkItem[]
 }
 
 // Позиция ведомости выполненных работ (этап 12, PRD §13.1). Водитель фиксирует ЧТО сделал и
@@ -218,6 +219,7 @@ model WorkItem {
   catalogItem   WorkCatalogItem? @relation(fields: [catalogItemId], references: [id])
   name          String // снимок названия работы (из справочника или свободный ввод)
   quantity      Int              @default(1)
+  price         Int? // цена за единицу, ₽ (этап 13): null пока диспетчер не расценил
   sortOrder     Int              @default(0)
   createdById   String // водитель, заполнивший позицию
   createdAt     DateTime         @default(now())

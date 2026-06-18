@@ -5,7 +5,9 @@
 import { prisma } from "@/lib/prisma";
 import type { Role, WorksheetStatus } from "@/generated/prisma/enums";
 import { canViewTask } from "./authz";
+import { isDispatcherRole } from "./task-status";
 import { Errors } from "./errors";
+import { notifyDispatchers, notifyTaskAssignee } from "@/lib/push";
 
 export type Actor = { id: string; role: Role };
 
@@ -153,12 +155,58 @@ export async function submitWorksheet(taskId: string, actor: Actor) {
   const count = await prisma.workItem.count({ where: { taskId } });
   if (count === 0) throw Errors.validation("Добавьте хотя бы одну работу перед отправкой");
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const updated = await tx.task.update({ where: { id: taskId }, data: { worksheetStatus: "PRICING" } });
     await tx.taskEvent.create({
       data: { taskId, actorId: actor.id, kind: "worksheet_submitted", comment: "Ведомость отправлена на расценку" },
     });
     return updated;
+  });
+  // Пуш диспетчерам: водитель ждёт цен (этап 13, PRD §13.1).
+  notifyDispatchers({ id: task.id, number: task.number, title: task.title });
+  return result;
+}
+
+export type PricingInput = { items: { id: string; price: number }[] };
+
+// Диспетчер проставляет цены по позициям и подтверждает расценку (PRICING→PRICED). Только диспетчер/админ.
+export async function priceWorksheet(taskId: string, input: PricingInput, actor: Actor) {
+  if (!isDispatcherRole(actor.role)) throw Errors.forbidden();
+  const task = await loadTaskForWorksheet(taskId, actor);
+  if (!task.type.requiresPricing) throw Errors.validation("Для этого типа задачи расценка не нужна");
+  if (task.worksheetStatus !== "PRICING" && task.worksheetStatus !== "PRICED") {
+    throw Errors.validation("Ведомость ещё не отправлена на расценку");
+  }
+  // Применяем цены только к позициям этой задачи (защита от чужих id в теле запроса).
+  const existing = await prisma.workItem.findMany({ where: { taskId }, select: { id: true } });
+  const ids = new Set(existing.map((i) => i.id));
+  const updates = input.items.filter((u) => ids.has(u.id));
+
+  const result = await prisma.$transaction(async (tx) => {
+    for (const u of updates) {
+      await tx.workItem.update({ where: { id: u.id }, data: { price: Math.max(0, Math.trunc(u.price)) } });
+    }
+    const updated = await tx.task.update({ where: { id: taskId }, data: { worksheetStatus: "PRICED" } });
+    await tx.taskEvent.create({
+      data: { taskId, actorId: actor.id, kind: "worksheet_priced", comment: "Ведомость расценена" },
+    });
+    return updated;
+  });
+  // Пуш водителю: цены готовы (этап 13).
+  notifyTaskAssignee(
+    { id: task.id, number: task.number, title: task.title, assigneeId: task.assigneeId },
+    "priced",
+    actor.id,
+  );
+  return result;
+}
+
+// Очередь «на расценке» для диспетчера: задачи с отправленной, но не расценённой ведомостью.
+export function listPricingQueue() {
+  return prisma.task.findMany({
+    where: { worksheetStatus: "PRICING" },
+    include: { type: true, assignee: { select: { id: true, name: true, login: true } } },
+    orderBy: [{ priority: "desc" }, { updatedAt: "asc" }],
   });
 }
 
