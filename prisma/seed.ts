@@ -59,27 +59,18 @@ const TASK_TYPES: { name: string; icon: string; requiresSignedDoc: boolean; requ
   { name: "Прочее", icon: "ellipsis", requiresSignedDoc: false, requiresPricing: false },
 ];
 
-// Справочник работ для ведомости (PRD §13.3). ЧЕРНОВИК структуры (заменяет прежний demo-набор):
-// реальные названия и цены VanMark Артём правит в /admin/work-catalog (цена-подсказка редактируется
-// там же) либо присылает списком для сида. price — цена-подсказка ₽/ед (опционально).
-// Сид — первичный загрузчик: create ставит цену, update её НЕ перетирает (источник цен — админка).
-const WORK_CATALOG: { name: string; price?: number }[] = [
-  { name: "Выезд мастера" },
-  { name: "Диагностика на объекте" },
-  { name: "Замена ножа" },
-  { name: "Заточка ножа" },
-  { name: "Настройка зазоров / прижима" },
-  { name: "Калибровка станка" },
-  { name: "Ремонт / замена привода" },
-  { name: "Замена ремня" },
-  { name: "Замена подшипника" },
-  { name: "Ремонт каретки / направляющих" },
-  { name: "Пусконаладка после ремонта" },
-  { name: "Нож (запчасть)" },
-  { name: "Ремень привода (запчасть)" },
-  { name: "Подшипник (запчасть)" },
-  { name: "Дог. машинка (узел)" },
-  { name: "Размотчик (узел)" },
+// Разделы справочника (группы услуг/товаров). Артём правит/добавляет в /admin/work-catalog.
+const WORK_CATEGORIES: { name: string; sortOrder: number }[] = [
+  { name: "Услуги", sortOrder: 1 },
+  { name: "Запчасти / товары", sortOrder: 2 },
+];
+
+// Справочник работ для ведомости (PRD §13.3). Стартовый набор VanMark (решение Артёма 19.06):
+// реальные названия/цены Артём правит в /admin/work-catalog. price — цена-подсказка ₽/ед, category —
+// название раздела. Сид — первичный загрузчик: create ставит цену/раздел, update их НЕ перетирает
+// (источник правды — админка). Позиции не из списка деактивируются (прежний черновик уходит).
+const WORK_CATALOG: { name: string; price?: number; category?: string }[] = [
+  { name: "Выездная диагностика / ремонт", price: 20_000, category: "Услуги" },
 ];
 
 // KPI / зарплата (Фаза 1.5): дефолты и логика — в prisma/seed-kpi.ts (там же безопасный
@@ -124,15 +115,27 @@ async function main(defaultPassword: string): Promise<void> {
   }
   console.log(`  ✓ типы задач: ${TASK_TYPES.length}`);
 
+  // Разделы справочника (upsert по имени; update не перетирает админские правки сверх порядка/активности).
+  for (const c of WORK_CATEGORIES) {
+    await prisma.workCategory.upsert({
+      where: { name: c.name },
+      update: { sortOrder: c.sortOrder, isActive: true },
+      create: { name: c.name, sortOrder: c.sortOrder },
+    });
+  }
+  const cats = await prisma.workCategory.findMany();
+  const catId = (name?: string): string | null => (name ? (cats.find((c) => c.name === name)?.id ?? null) : null);
+  console.log(`  ✓ разделы справочника: ${WORK_CATEGORIES.length}`);
+
   for (const [i, item] of WORK_CATALOG.entries()) {
     await prisma.workCatalogItem.upsert({
       where: { name: item.name },
-      // update НЕ трогает defaultPrice — цены настраивает админ в UI (PRD §13.3); сид их не перетирает.
+      // update НЕ трогает defaultPrice/categoryId — их настраивает админ в UI (PRD §13.3).
       update: { sortOrder: i + 1, isActive: true },
-      create: { name: item.name, sortOrder: i + 1, defaultPrice: item.price ?? null },
+      create: { name: item.name, sortOrder: i + 1, defaultPrice: item.price ?? null, categoryId: catId(item.category) },
     });
   }
-  // Деактивируем работы, которых нет в актуальном списке (прежний demo-набор) — НЕ удаляем,
+  // Деактивируем работы, которых нет в актуальном списке (прежний черновик) — НЕ удаляем,
   // чтобы не порвать ссылки уже заполненных ведомостей (WorkItem.catalogItemId).
   const catalogNames = WORK_CATALOG.map((w) => w.name);
   const deactivated = await prisma.workCatalogItem.updateMany({

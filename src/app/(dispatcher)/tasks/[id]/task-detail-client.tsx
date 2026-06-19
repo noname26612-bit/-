@@ -145,11 +145,16 @@ export function TaskDetailClient({
       await apiSend(key + "/comments", "POST", { text: comment });
       setComment("");
     });
+  // Значение поля цены: ручной ввод → уже проставленная цена → цена-подсказка из справочника → пусто.
+  // Подсказка (defaultPrice) приходит только диспетчеру (PRD §13: водителю цены не видны).
+  const priceStr = (w: { id: string; price: number | null; defaultPrice?: number | null }): string =>
+    prices[w.id] ?? (w.price != null ? String(w.price) : w.defaultPrice != null ? String(w.defaultPrice) : "");
+
   const savePricing = () =>
     run(async () => {
       const items = (task?.workItems ?? []).map((w) => ({
         id: w.id,
-        price: Number.parseInt(prices[w.id] ?? (w.price != null ? String(w.price) : "0"), 10) || 0,
+        price: Number.parseInt(priceStr(w), 10) || 0,
       }));
       await apiSend(`${key}/worksheet/pricing`, "POST", { items });
     });
@@ -161,8 +166,7 @@ export function TaskDetailClient({
     task.workItems.length > 0 &&
     (task.worksheetStatus === "PRICING" || task.worksheetStatus === "PRICED");
   const pricingTotal = task.workItems.reduce((s, w) => {
-    const val = prices[w.id] ?? (w.price != null ? String(w.price) : "");
-    return s + (Number.parseInt(val, 10) || 0) * w.quantity;
+    return s + (Number.parseInt(priceStr(w), 10) || 0) * w.quantity;
   }, 0);
 
   // Акт (этап 14, PRD §13): документы (DOCUMENT) отделены от фото — PDF открывается ссылкой, не <img>.
@@ -314,7 +318,7 @@ export function TaskDetailClient({
               </thead>
               <tbody>
                 {task.workItems.map((w) => {
-                  const val = prices[w.id] ?? (w.price != null ? String(w.price) : "");
+                  const val = priceStr(w);
                   const sum = (Number.parseInt(val, 10) || 0) * w.quantity;
                   return (
                     <tr key={w.id} className="border-b border-neutral-100 last:border-0">

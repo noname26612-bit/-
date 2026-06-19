@@ -82,7 +82,16 @@ export type AttachmentDTO = {
   createdAt: string;
 };
 
-export type WorkCatalogItemDTO = { id: string; name: string }; // для водителя: без цены (PRD §13)
+// Раздел справочника (группа услуг/товаров) — управляет админ.
+export type WorkCategoryDTO = { id: string; name: string; sortOrder: number; isActive: boolean };
+
+// Для водителя: без цены (PRD §13); с разделом — для группировки в выборе.
+export type WorkCatalogItemDTO = {
+  id: string;
+  name: string;
+  categoryId: string | null;
+  categoryName: string | null;
+};
 
 export type WorkCatalogFullDTO = WorkCatalogItemDTO & {
   isActive: boolean;
@@ -96,6 +105,7 @@ export type WorkItemDTO = {
   name: string;
   quantity: number;
   price: number | null; // цена за единицу, ₽ (этап 13): null пока не расценено
+  defaultPrice?: number | null; // цена-подсказка из справочника (этап «справочник»): только диспетчеру
   sortOrder: number;
   createdById: string;
   createdAt: string;
