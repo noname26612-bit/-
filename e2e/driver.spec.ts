@@ -1,4 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
+import { resetActiveTasks } from "./reset";
+
+// Чистый старт для правила «одна активная задача» (этап B): гасим зависшие IN_PROGRESS перед каждым тестом.
+test.beforeEach(resetActiveTasks);
 
 const PASSWORD = process.env.SEED_PASSWORD ?? "vanmark123";
 const today = new Date().toISOString().slice(0, 10);
@@ -124,4 +128,41 @@ test("изоляция: водитель A не видит и не меняет 
   await mctx.close();
   await actx.close();
   await guest.close();
+});
+
+// Этап B: у водителя не больше одной задачи «В работе» одновременно.
+test("одна активная задача: вторую нельзя взять, пока первая не завершена", async ({ browser }) => {
+  test.slow();
+  const mctx = await browser.newContext();
+  const milena = await mctx.newPage();
+  await login(milena, "milena");
+
+  // Две задачи на одного водителя (Писарев — реже занят другими тестами на общей БД).
+  const t1 = await createAssignedTask(milena, "Алексей Писарев", "Сдача в ТК");
+  const t2 = await createAssignedTask(milena, "Алексей Писарев", "Сдача в ТК");
+
+  const dctx = await browser.newContext();
+  const driver = await dctx.newPage();
+  await login(driver, "pisarev");
+
+  // Первую берём в работу — ок.
+  const r1 = await driver.request.post(`/api/tasks/${t1.id}/transition`, { data: { toStatus: "IN_PROGRESS" } });
+  expect(r1.status()).toBe(200);
+
+  // Вторую взять нельзя — 409 ACTIVE_TASK_EXISTS.
+  const r2 = await driver.request.post(`/api/tasks/${t2.id}/transition`, { data: { toStatus: "IN_PROGRESS" } });
+  expect(r2.status()).toBe(409);
+  expect((await r2.json()).error.code).toBe("ACTIVE_TASK_EXISTS");
+
+  // Завершаем первую — слот освобождается, вторую теперь можно взять.
+  const done1 = await driver.request.post(`/api/tasks/${t1.id}/transition`, { data: { toStatus: "DONE" } });
+  expect(done1.status()).toBe(200);
+  const r2b = await driver.request.post(`/api/tasks/${t2.id}/transition`, { data: { toStatus: "IN_PROGRESS" } });
+  expect(r2b.status()).toBe(200);
+
+  // Прибираемся: не оставляем pisarev с активной задачей для других тестов на общей БД.
+  await driver.request.post(`/api/tasks/${t2.id}/transition`, { data: { toStatus: "DONE" } });
+
+  await mctx.close();
+  await dctx.close();
 });

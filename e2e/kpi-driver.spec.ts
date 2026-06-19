@@ -1,4 +1,8 @@
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
+import { resetActiveTasks } from "./reset";
+
+// Чистый старт для правила «одна активная задача» (этап B): гасим зависшие IN_PROGRESS перед каждым тестом.
+test.beforeEach(resetActiveTasks);
 
 const PASSWORD = process.env.SEED_PASSWORD ?? "vanmark123";
 

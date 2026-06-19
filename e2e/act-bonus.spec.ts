@@ -1,4 +1,8 @@
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
+import { resetActiveTasks } from "./reset";
+
+// Чистый старт для правила «одна активная задача» (этап B): гасим зависшие IN_PROGRESS перед каждым тестом.
+test.beforeEach(resetActiveTasks);
 
 // Этап 15: бонус за комплектность актов (PRD §12.6). +5000₽ при ≥80% завершённых актовых задач
 // с приложенным актом, помесячно. Проверяем: счёт базы/комплекта из реальных задач, видимость у

@@ -642,6 +642,17 @@ export async function transitionTask(
     throw Errors.paymentRequired();
   }
 
+  // Одна активная задача (этап B): у исполнителя не больше одной задачи «В работе» одновременно.
+  // Правило по assigneeId — работает и когда водитель берёт сам, и когда диспетчер ведёт за исполнителя
+  // (взятие из ASSIGNED или возобновление из ON_HOLD). Для масштаба 3 пользователей гонка исключена де-факто.
+  if (toStatus === "IN_PROGRESS" && task.assigneeId) {
+    const other = await prisma.task.findFirst({
+      where: { assigneeId: task.assigneeId, status: "IN_PROGRESS", id: { not: taskId } },
+      select: { number: true },
+    });
+    if (other) throw Errors.activeTaskExists(other.number);
+  }
+
   const data: Prisma.TaskUpdateInput = { status: toStatus };
   if (toStatus === "ON_HOLD") data.holdReason = reason;
   if (toStatus === "CANCELLED") data.cancelReason = reason;

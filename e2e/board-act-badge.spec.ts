@@ -1,4 +1,8 @@
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
+import { resetActiveTasks } from "./reset";
+
+// Чистый старт для правила «одна активная задача» (этап B): гасим зависшие IN_PROGRESS перед каждым тестом.
+test.beforeEach(resetActiveTasks);
 
 // Хвост этапа 14: признак комплектности акта на доске «Сегодня». Показывается ТОЛЬКО на завершённой
 // актовой задаче — янтарь «Акт не приложен» / зелёный «Акт приложен». Ассерт привязан к уникальному

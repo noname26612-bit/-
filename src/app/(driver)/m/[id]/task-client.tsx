@@ -20,6 +20,7 @@ import {
   formatDateTime,
   formatMoney,
   navUrl,
+  todayISO,
 } from "@/lib/task-ui";
 import { TypeIcon } from "@/components/type-icon";
 import { Badge } from "@/components/ui/badge";
@@ -78,6 +79,13 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
   const { data: workCatalog = [] } = useSWR<WorkCatalogItemDTO[]>(
     task?.type.requiresPricing ? "/api/work-catalog" : null,
     fetcher,
+  );
+  // Одна активная задача (этап B): знаем про другую задачу водителя «В работе», чтобы заранее
+  // заблокировать кнопку «В работу» (сервер всё равно запретит — это проактивная подсказка в UI).
+  const { data: myToday = [] } = useSWR<{ id: string; status: TaskStatus; number: number }[]>(
+    `/api/my/tasks?date=${todayISO()}&scope=today`,
+    fetcher,
+    { refreshInterval: 10_000 },
   );
 
   const [retrying, setRetrying] = useState(false);
@@ -314,6 +322,9 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
 
   const next = NEXT[t.status];
   const canHold = CAN_HOLD.includes(t.status);
+  // Одна активная задача (этап B): если уже есть другая «В работе», кнопку взятия блокируем.
+  const activeOther = myToday.find((x) => x.status === "IN_PROGRESS" && x.id !== t.id);
+  const blockedByActive = next?.to === "IN_PROGRESS" && !!activeOther;
 
   return (
     <div className="pb-44">
@@ -676,14 +687,21 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
         {actionError ? <p className="mb-2 text-center text-sm text-red-600">{actionError}</p> : null}
 
         {next ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => (next.to === "DONE" ? openCompletion() : void changeStatus(next.to))}
-            className={`flex h-14 w-full items-center justify-center rounded-xl text-lg font-semibold text-white transition-colors disabled:opacity-60 ${next.cls}`}
-          >
-            {next.label} →
-          </button>
+          <>
+            <button
+              type="button"
+              disabled={busy || blockedByActive}
+              onClick={() => (next.to === "DONE" ? openCompletion() : void changeStatus(next.to))}
+              className={`flex h-14 w-full items-center justify-center rounded-xl text-lg font-semibold text-white transition-colors disabled:opacity-60 ${next.cls}`}
+            >
+              {next.label} →
+            </button>
+            {blockedByActive ? (
+              <p className="mt-1 text-center text-sm text-amber-700">
+                Сначала завершите активную задачу №{activeOther?.number}
+              </p>
+            ) : null}
+          </>
         ) : t.status === "DONE" ? (
           <p className="py-2 text-center text-base font-medium text-green-700">Задача выполнена ✓</p>
         ) : t.status === "CANCELLED" ? (

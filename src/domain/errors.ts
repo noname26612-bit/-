@@ -23,6 +23,14 @@ export const Errors = {
     new DomainError("PHOTO_REQUIRED", "Для завершения нужно фото", 422),
   paymentRequired: () =>
     new DomainError("PAYMENT_REQUIRED", "Подтвердите получение денег", 422),
+  activeTaskExists: (taskNumber?: number) =>
+    new DomainError(
+      "ACTIVE_TASK_EXISTS",
+      taskNumber
+        ? `Сначала завершите активную задачу №${taskNumber}`
+        : "У водителя уже есть задача в работе",
+      409,
+    ),
   uploadInvalid: (message: string) => new DomainError("UPLOAD_INVALID", message, 422),
   validation: (message: string) => new DomainError("VALIDATION", message, 422),
   periodClosed: () =>
