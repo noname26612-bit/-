@@ -69,7 +69,8 @@ export type KpiSettingsView = {
 
 // Подписи видов нарушений для интерфейса (русский, кратко).
 export const KPI_KIND_LABEL: Record<KpiMarkKind, string> = {
-  LATE: "Опоздание",
+  SHIFT_LATE: "Поздно открыл смену",
+  LATE: "Опоздание на объект", // legacy (до этапа D)
   UNSIGNED_DOCS: "Без акта",
   MISSED_STOP: "Невыполненная точка",
   MANUAL: "Ручная отметка",
@@ -77,7 +78,8 @@ export const KPI_KIND_LABEL: Record<KpiMarkKind, string> = {
 
 // Цвет бейджа вида нарушения (палитра ui-guidelines: оранжевый/красный/жёлтый/нейтральный).
 export const KPI_KIND_BADGE: Record<KpiMarkKind, string> = {
-  LATE: "bg-orange-100 text-orange-700",
+  SHIFT_LATE: "bg-orange-100 text-orange-700",
+  LATE: "bg-orange-100 text-orange-700", // legacy
   UNSIGNED_DOCS: "bg-red-100 text-red-700",
   MISSED_STOP: "bg-amber-100 text-amber-800",
   MANUAL: "bg-slate-100 text-slate-700",

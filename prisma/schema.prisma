@@ -293,6 +293,7 @@ model Shift {
   confirmedAt   DateTime?
   closedAt      DateTime?
   createdAt     DateTime    @default(now())
+  kpiMarks      KpiMark[] // отметки KPI по смене (SHIFT_LATE, этап D)
 
   @@unique([driverId, date]) // одна смена на водителя в день
   @@index([date, status])
@@ -305,7 +306,8 @@ model Shift {
 
 // Виды отметок KPI: 3 авто-метрики (детектор) + ручная отметка диспетчера.
 enum KpiMarkKind {
-  LATE // опоздание: «На месте» позже timeTo задачи (PRD §12.1)
+  SHIFT_LATE // поздно открыл смену (этап D): openedAt позже порога 9:15. Заменяет LATE
+  LATE // legacy: опоздание на объект (до этапа D); новых не создаётся, остаётся в истории
   UNSIGNED_DOCS // ремонтная задача завершена без подписанного акта (документ-вложения)
   MISSED_STOP // назначенная на день точка не доведена до DONE (без переноса/отмены)
   MANUAL // ручная отметка: штраф или поощрение (знаковая сумма в manualAmount)
@@ -333,8 +335,10 @@ model KpiMark {
   id           String        @id @default(uuid())
   driverId     String // чей KPI; изоляция водителя — по нему
   driver       User          @relation("kpiDriver", fields: [driverId], references: [id])
-  taskId       String? // привязка к задаче (LATE/UNSIGNED_DOCS/MISSED_STOP); null — ручная общая
+  taskId       String? // привязка к задаче (UNSIGNED_DOCS/MISSED_STOP); null — смена/ручная
   task         Task?         @relation(fields: [taskId], references: [id])
+  shiftId      String? // привязка к смене (SHIFT_LATE, этап D); null — задачная/ручная
+  shift        Shift?        @relation(fields: [shiftId], references: [id])
   period       String // месяц начисления «YYYY-MM» (по occurredAt в CRON_TZ)
   kind         KpiMarkKind
   status       KpiMarkStatus @default(CANDIDATE)
@@ -348,6 +352,7 @@ model KpiMark {
   createdAt    DateTime      @default(now())
 
   @@unique([taskId, kind]) // идемпотентность детектора: одна авто-отметка вида на задачу
+  @@unique([shiftId, kind]) // идемпотентность детектора смен: одна SHIFT_LATE на смену (этап D)
   @@index([driverId, period])
   @@index([status, period])
 }
@@ -430,6 +435,10 @@ model CapacitySettings {
   avgSpeedKmh     Int      @default(50) // средняя скорость свободной дороги, км/ч; калибруется по факту
   detourPercent   Int      @default(110) // коэфф. петляния (110 = ×1.1)
   countReturnTrip Boolean  @default(false) // учитывать обратную дорогу (база→точка→база)
+  // Смена (этап D): порог «поздно открыл смену». shiftStartMinutes — начало рабочего дня (минуты от
+  // полуночи: 540 = 9:00); shiftLateGraceMinutes — запас (15 мин → опоздание после 9:15).
+  shiftStartMinutes     Int @default(540)
+  shiftLateGraceMinutes Int @default(15)
   updatedAt       DateTime @updatedAt
 }
 

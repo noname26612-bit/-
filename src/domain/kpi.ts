@@ -1,17 +1,18 @@
 // ЯДРО KPI (Фаза 1.5) — чистые функции без доступа к БД: утилиты времени/периода, детекторы
 // трёх нарушений и прогрессивный расчёт зарплаты. Покрыто unit-тестами (kpi.test.ts).
 // Продукт — PRD §12, модель — ARCHITECTURE §4а. Доступ к БД и изоляция — в kpi-service.ts.
-import type { KpiMarkKind } from "@/generated/prisma/enums";
+import type { KpiMarkKind, ShiftStatus } from "@/generated/prisma/enums";
 
 // Таймзона расчёта дат/периодов. Совпадает с cron (ARCHITECTURE §8). Москва — фиксированный UTC+3.
 export const KPI_TZ = process.env.CRON_TZ ?? "Europe/Moscow";
 
 // Виды авто-нарушений (детектируются системой). MANUAL — отдельный ручной вид, не детектируется.
-export type AutoKind = "LATE" | "UNSIGNED_DOCS" | "MISSED_STOP";
-export const AUTO_KINDS: AutoKind[] = ["LATE", "UNSIGNED_DOCS", "MISSED_STOP"];
+// Этап D: «опоздание на объект» (LATE, legacy) заменено на «поздно открыл смену» (SHIFT_LATE).
+export type AutoKind = "SHIFT_LATE" | "UNSIGNED_DOCS" | "MISSED_STOP";
+export const AUTO_KINDS: AutoKind[] = ["SHIFT_LATE", "UNSIGNED_DOCS", "MISSED_STOP"];
 
 export function isAutoKind(kind: KpiMarkKind): kind is AutoKind {
-  return kind === "LATE" || kind === "UNSIGNED_DOCS" || kind === "MISSED_STOP";
+  return kind === "SHIFT_LATE" || kind === "UNSIGNED_DOCS" || kind === "MISSED_STOP";
 }
 
 // ───────────────────────────── Время и период ─────────────────────────────
@@ -89,7 +90,8 @@ export function parseHHMM(value: string | null | undefined): number | null {
 export type Candidate = {
   kind: AutoKind;
   driverId: string;
-  taskId: string;
+  taskId: string | null; // привязка к задаче (UNSIGNED_DOCS/MISSED_STOP)
+  shiftId: string | null; // привязка к смене (SHIFT_LATE)
   occurredAt: Date;
   period: string;
   note: string;
@@ -97,33 +99,35 @@ export type Candidate = {
 
 const FINAL_FOR_MISSED = new Set(["DONE", "CANCELLED", "RESCHEDULED"]);
 
-/** Опоздание: задача взята в работу позже окна времени (timeTo). PRD §12.1.
- *  Этап A: «момент начала работы» — первый переход в IN_PROGRESS (раньше — ON_SITE «На месте»).
- *  Этап D переносит «опоздание» на открытие смены (SHIFT_LATE). */
-export type LateInput = {
-  driverId: string | null;
-  taskId: string;
-  scheduledDate: Date | null;
-  timeTo: string | null;
-  onSiteAt: Date | null; // момент первого перехода в IN_PROGRESS (из журнала событий)
+/** Поздно открыл смену (этап D, PRD §12.1): фактическое время открытия (openedAt) позже порога
+ *  «начало рабочего дня + запас» (по умолчанию 9:15). Считается только по ПОДТВЕРЖДЁННОЙ смене
+ *  (диспетчер подтвердил приход) — REQUESTED пропускаем. Заменяет прежнее «опоздание на объект». */
+export type ShiftLateInput = {
+  driverId: string;
+  shiftId: string;
+  openedAt: Date;
+  status: ShiftStatus;
 };
 
-export function detectLate(t: LateInput, tz: string = KPI_TZ): Candidate | null {
-  if (!t.driverId || !t.onSiteAt) return null; // не приехал или нет исполнителя
-  const due = parseHHMM(t.timeTo);
-  if (due === null) return null; // нет/нечитаемое окно времени — пропускаем (§8), Милена добавит вручную
-  const onSite = wallParts(t.onSiteAt, tz);
-  // Опорный день: дата задачи, а если её нет — день фактического приезда.
-  const refDateKey = t.scheduledDate ? utcDateKey(t.scheduledDate) : onSite.dateKey;
-  const late = onSite.dateKey > refDateKey || (onSite.dateKey === refDateKey && onSite.minutes > due);
-  if (!late) return null;
+export function detectShiftLate(
+  s: ShiftLateInput,
+  startMinutes: number,
+  graceMinutes: number,
+  tz: string = KPI_TZ,
+): Candidate | null {
+  if (s.status === "REQUESTED") return null; // приход не подтверждён диспетчером — пока не штрафуем
+  const w = wallParts(s.openedAt, tz);
+  if (w.minutes <= startMinutes + graceMinutes) return null;
+  const hh = Math.floor(w.minutes / 60);
+  const mm = w.minutes % 60;
   return {
-    kind: "LATE",
-    driverId: t.driverId,
-    taskId: t.taskId,
-    occurredAt: t.onSiteAt,
-    period: periodOf(t.onSiteAt, tz),
-    note: `Опоздание: на месте позже ${t.timeTo}`,
+    kind: "SHIFT_LATE",
+    driverId: s.driverId,
+    taskId: null,
+    shiftId: s.shiftId,
+    occurredAt: s.openedAt,
+    period: periodOf(s.openedAt, tz),
+    note: `Поздно открыл смену (${hh}:${String(mm).padStart(2, "0")})`,
   };
 }
 
@@ -147,6 +151,7 @@ export function detectUnsignedDoc(t: UnsignedDocInput, tz: string = KPI_TZ): Can
     kind: "UNSIGNED_DOCS",
     driverId: t.driverId,
     taskId: t.taskId,
+    shiftId: null,
     occurredAt,
     period: periodOf(occurredAt, tz),
     note: "Завершено без подписанного акта",
@@ -172,6 +177,7 @@ export function detectMissedStop(t: MissedStopInput, asOf: Date, tz: string = KP
     kind: "MISSED_STOP",
     driverId: t.driverId,
     taskId: t.taskId,
+    shiftId: null,
     occurredAt,
     period: dayKey.slice(0, 7),
     note: "Точка дня не доведена до «Выполнено»",

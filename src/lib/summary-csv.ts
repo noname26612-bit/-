@@ -9,11 +9,13 @@ export const SUMMARY_CSV_HEADERS = [
   "Выполнено",
   "Ремонты",
   "Доставки",
-  "Опоздания",
+  "Поздние смены",
   "Невыполненные точки",
   "Отмены",
   "Переносы",
-  "Среднее на объекте, мин",
+  "Среднее на задаче, мин",
+  "Отработано, мин",
+  "Простой, мин",
 ];
 
 export function buildSummaryCsv(overview: SummaryOverview): string {
@@ -29,6 +31,8 @@ export function buildSummaryCsv(overview: SummaryOverview): string {
       d.cancelledCount,
       d.rescheduledCount,
       d.avgOnSiteMinutes ?? "",
+      d.workedMinutes,
+      d.idleMinutes,
     ]),
     [
       "Итого",
@@ -40,6 +44,8 @@ export function buildSummaryCsv(overview: SummaryOverview): string {
       overview.totals.cancelledCount,
       overview.totals.rescheduledCount,
       overview.totals.avgOnSiteMinutes ?? "",
+      overview.totals.workedMinutes,
+      overview.totals.idleMinutes,
     ],
   ];
   return toCsv(rows);
