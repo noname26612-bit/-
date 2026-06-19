@@ -197,14 +197,26 @@ model Attachment {
   @@index([taskId, createdAt])
 }
 
+// Раздел справочника работ (группа услуг/товаров). Наполняет админ; позиции группируются по
+// разделам в выборе у водителя и в админке. Позиция может быть без раздела (categoryId=null).
+model WorkCategory {
+  id        String            @id @default(uuid())
+  name      String            @unique // «Услуги», «Запчасти / товары»...
+  sortOrder Int               @default(0)
+  isActive  Boolean           @default(true)
+  items     WorkCatalogItem[]
+}
+
 // Справочник работ для ведомости (этап 12, PRD §13.3). Наполняет админ. Цены-подсказки — этап 13.
 model WorkCatalogItem {
-  id           String     @id @default(uuid())
-  name         String     @unique // «Диагностика», «Замена ножа»...
+  id           String        @id @default(uuid())
+  name         String        @unique // «Диагностика», «Замена ножа»...
   defaultPrice Int? // подсказка цены за единицу, ₽ (этап 13); диспетчер правит при расценке
-  isActive     Boolean    @default(true)
-  sortOrder    Int        @default(0)
-  createdAt    DateTime   @default(now())
+  categoryId   String? // раздел справочника (группа); null — без раздела
+  category     WorkCategory? @relation(fields: [categoryId], references: [id])
+  isActive     Boolean       @default(true)
+  sortOrder    Int           @default(0)
+  createdAt    DateTime      @default(now())
   workItems    WorkItem[]
 }
 

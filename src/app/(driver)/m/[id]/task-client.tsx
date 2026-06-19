@@ -56,6 +56,18 @@ type StatusExtra = {
   paymentAmount?: number | null;
 };
 
+// Группирует справочник по разделам (для optgroup). Порядок сохраняется (сервер уже отдаёт по
+// разделу→позиции); позиции без раздела (categoryName=null) идут своей группой без заголовка.
+function groupCatalog(items: WorkCatalogItemDTO[]): { name: string | null; items: WorkCatalogItemDTO[] }[] {
+  const groups: { name: string | null; items: WorkCatalogItemDTO[] }[] = [];
+  for (const c of items) {
+    const last = groups[groups.length - 1];
+    if (last && last.name === c.categoryName) last.items.push(c);
+    else groups.push({ name: c.categoryName, items: [c] });
+  }
+  return groups;
+}
+
 export function DriverTaskClient({ taskId }: { taskId: string }) {
   const key = `/api/tasks/${taskId}`;
   const { data: task, error, isLoading, mutate } = useSWR<TaskDetailDTO>(key, fetcher, {
@@ -487,11 +499,23 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
                   className="h-11 rounded-lg border border-neutral-300 px-3 text-base outline-none focus:border-neutral-900"
                 >
                   <option value="">Своя работа (вписать)…</option>
-                  {workCatalog.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
+                  {groupCatalog(workCatalog).map((g, gi) =>
+                    g.name ? (
+                      <optgroup key={gi} label={g.name}>
+                        {g.items.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : (
+                      g.items.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))
+                    ),
+                  )}
                 </select>
                 {!workSel ? (
                   <input

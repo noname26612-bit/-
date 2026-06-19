@@ -1,5 +1,10 @@
-// Разбор тела запросов ведомости/справочника работ из untrusted JSON (этап 12–13).
-import type { WorkItemInput, WorkCatalogInput, PricingInput } from "@/domain/work-service";
+// Разбор тела запросов ведомости/справочника работ из untrusted JSON (этап 12–13 + разделы).
+import type {
+  WorkItemInput,
+  WorkCatalogInput,
+  WorkCategoryInput,
+  PricingInput,
+} from "@/domain/work-service";
 
 export function parsePricingInput(body: Record<string, unknown>): PricingInput {
   const items: { id: string; price: number }[] = [];
@@ -43,5 +48,18 @@ export function parseWorkCatalogInput(body: Record<string, unknown>): Partial<Wo
     if (v === null) out.defaultPrice = null;
     else if (typeof v === "number" && Number.isFinite(v)) out.defaultPrice = Math.trunc(v);
   }
+  // Раздел: id (string) или null (без раздела).
+  if ("categoryId" in body) {
+    const v = body.categoryId;
+    if (v === null || typeof v === "string") out.categoryId = v;
+  }
+  return out;
+}
+
+export function parseWorkCategoryInput(body: Record<string, unknown>): Partial<WorkCategoryInput> {
+  const out: Partial<WorkCategoryInput> = {};
+  if (typeof body.name === "string") out.name = body.name;
+  if (typeof body.sortOrder === "number") out.sortOrder = Math.trunc(body.sortOrder);
+  if (typeof body.isActive === "boolean") out.isActive = body.isActive;
   return out;
 }

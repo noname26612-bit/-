@@ -105,6 +105,11 @@ const taskDetailInclude = {
 export type TaskListItem = Prisma.TaskGetPayload<{ include: typeof taskInclude }>;
 export type TaskDetail = Prisma.TaskGetPayload<{ include: typeof taskDetailInclude }>;
 
+// Карточка с цено-подсказками к позициям ведомости (этап «справочник»). defaultPrice добавляется
+// ТОЛЬКО для диспетчера/админа (водителю цены не видны, PRD §13). Для водителя поле отсутствует.
+type WorkItemWithHint = TaskDetail["workItems"][number] & { defaultPrice?: number | null };
+export type TaskDetailWire = Omit<TaskDetail, "workItems"> & { workItems: WorkItemWithHint[] };
+
 // Элемент списка для клиента: payload с _count, развёрнутым в булев флаг hasSignedDoc (этап 14).
 type TaskListPayload = Prisma.TaskGetPayload<{ include: typeof taskListInclude }>;
 export type TaskListWire = Omit<TaskListPayload, "_count"> & { hasSignedDoc: boolean };
@@ -241,11 +246,29 @@ export async function listAttention(today: string): Promise<BoardAttention> {
 }
 
 /** Карточка задачи с историей. Изоляция: водителю чужая задача отдаёт 404. */
-export async function getTaskById(taskId: string, actor: Actor): Promise<TaskDetail> {
+export async function getTaskById(taskId: string, actor: Actor): Promise<TaskDetailWire> {
   const task = await prisma.task.findUnique({ where: { id: taskId }, include: taskDetailInclude });
   if (!task) throw Errors.notFound();
   if (!canViewTask(actor, task)) throw Errors.notFound();
-  return task;
+  // Диспетчеру/админу подставляем цену-подсказку из справочника к позициям ведомости (для расценки).
+  // Водителю — НЕ отдаём (PRD §13: цены ему не видны). Поэтому это отдельный шаг, а не общий include.
+  if (!isDispatcherRole(actor.role)) return task;
+  const ids = [
+    ...new Set(task.workItems.map((w) => w.catalogItemId).filter((x): x is string => x !== null)),
+  ];
+  if (ids.length === 0) return task;
+  const hints = await prisma.workCatalogItem.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, defaultPrice: true },
+  });
+  const priceById = new Map(hints.map((h) => [h.id, h.defaultPrice]));
+  return {
+    ...task,
+    workItems: task.workItems.map((w) => ({
+      ...w,
+      defaultPrice: w.catalogItemId ? (priceById.get(w.catalogItemId) ?? null) : null,
+    })),
+  };
 }
 
 // --- Записи ----------------------------------------------------------------

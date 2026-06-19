@@ -18,21 +18,84 @@ function clean(v: string | null | undefined): string | null {
   return t.length > 0 ? t : null;
 }
 
-// ───────────────────────────── Справочник работ ─────────────────────────────
+// ───────────────────────────── Разделы справочника (группы) ─────────────────────────────
 
-// Справочник для ВОДИТЕЛЯ: только id+name — цену-подсказку (defaultPrice) водителю НЕ отдаём
-// (PRD §13: водитель не формирует и не видит цены до расценки). Цены — у диспетчера/админа.
-export function listWorkCatalog() {
-  return prisma.workCatalogItem.findMany({
-    where: { isActive: true },
-    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    select: { id: true, name: true },
+export function listWorkCategories() {
+  return prisma.workCategory.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] });
+}
+
+export type WorkCategoryInput = { name: string; sortOrder?: number; isActive?: boolean };
+
+export async function createWorkCategory(input: Partial<WorkCategoryInput>, actor: { role: Role }) {
+  assertAdmin(actor.role);
+  const name = clean(input.name);
+  if (!name) throw Errors.validation("Название раздела не может быть пустым");
+  if (await prisma.workCategory.findUnique({ where: { name } })) {
+    throw Errors.validation("Раздел с таким названием уже есть");
+  }
+  return prisma.workCategory.create({
+    data: { name, sortOrder: input.sortOrder ?? 0, isActive: input.isActive ?? true },
   });
 }
 
-// Полный справочник для АДМИНА (включая defaultPrice и скрытые позиции).
-export function listAllWorkCatalog() {
-  return prisma.workCatalogItem.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] });
+export async function updateWorkCategory(id: string, input: Partial<WorkCategoryInput>, actor: { role: Role }) {
+  assertAdmin(actor.role);
+  const existing = await prisma.workCategory.findUnique({ where: { id } });
+  if (!existing) throw Errors.notFound();
+  const data: { name?: string; sortOrder?: number; isActive?: boolean } = {};
+  if (input.name !== undefined) {
+    const name = clean(input.name);
+    if (!name) throw Errors.validation("Название раздела не может быть пустым");
+    if (name !== existing.name && (await prisma.workCategory.findUnique({ where: { name } }))) {
+      throw Errors.validation("Раздел с таким названием уже есть");
+    }
+    data.name = name;
+  }
+  if (input.sortOrder !== undefined) data.sortOrder = input.sortOrder;
+  if (input.isActive !== undefined) data.isActive = input.isActive;
+  return prisma.workCategory.update({ where: { id }, data });
+}
+
+// ───────────────────────────── Справочник работ ─────────────────────────────
+
+// Порядок: по разделу (sortOrder раздела), затем позиции внутри. Позиции без раздела — в конце.
+const catalogOrder = [
+  { category: { sortOrder: "asc" } },
+  { sortOrder: "asc" },
+  { name: "asc" },
+] satisfies Prisma.WorkCatalogItemOrderByWithRelationInput[];
+
+// Справочник для ВОДИТЕЛЯ: id, name и название раздела (для группировки). Цену-подсказку
+// (defaultPrice) водителю НЕ отдаём — PRD §13: водитель не формирует и не видит цены до расценки.
+export async function listWorkCatalog() {
+  const rows = await prisma.workCatalogItem.findMany({
+    where: { isActive: true },
+    orderBy: catalogOrder,
+    select: { id: true, name: true, categoryId: true, category: { select: { name: true } } },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    categoryId: r.categoryId,
+    categoryName: r.category?.name ?? null,
+  }));
+}
+
+// Полный справочник для АДМИНА (включая defaultPrice, раздел и скрытые позиции).
+export async function listAllWorkCatalog() {
+  const rows = await prisma.workCatalogItem.findMany({
+    orderBy: catalogOrder,
+    include: { category: { select: { name: true } } },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    defaultPrice: r.defaultPrice,
+    categoryId: r.categoryId,
+    categoryName: r.category?.name ?? null,
+    isActive: r.isActive,
+    sortOrder: r.sortOrder,
+  }));
 }
 
 export type WorkCatalogInput = {
@@ -40,12 +103,21 @@ export type WorkCatalogInput = {
   isActive?: boolean;
   sortOrder?: number;
   defaultPrice?: number | null; // цена-подсказка ₽/ед (этап «справочник»): null — без подсказки
+  categoryId?: string | null; // раздел справочника; null — без раздела
 };
 
 // Нормализует цену-подсказку: null оставляем, число — целое ≥0.
 function cleanPrice(v: number | null | undefined): number | null {
   if (v === null || v === undefined) return null;
   return Math.max(0, Math.trunc(v));
+}
+
+// Проверяет, что раздел существует (иначе FK-ошибка); null — без раздела.
+async function resolveCategoryId(categoryId: string | null | undefined): Promise<string | null> {
+  if (!categoryId) return null;
+  const cat = await prisma.workCategory.findUnique({ where: { id: categoryId } });
+  if (!cat) throw Errors.validation("Раздел не найден");
+  return cat.id;
 }
 
 export async function createWorkCatalogItem(input: Partial<WorkCatalogInput>, actor: { role: Role }) {
@@ -61,6 +133,7 @@ export async function createWorkCatalogItem(input: Partial<WorkCatalogInput>, ac
       sortOrder: input.sortOrder ?? 0,
       isActive: input.isActive ?? true,
       defaultPrice: cleanPrice(input.defaultPrice),
+      categoryId: await resolveCategoryId(input.categoryId),
     },
   });
 }
@@ -69,7 +142,13 @@ export async function updateWorkCatalogItem(id: string, input: Partial<WorkCatal
   assertAdmin(actor.role);
   const existing = await prisma.workCatalogItem.findUnique({ where: { id } });
   if (!existing) throw Errors.notFound();
-  const data: { name?: string; isActive?: boolean; sortOrder?: number; defaultPrice?: number | null } = {};
+  const data: {
+    name?: string;
+    isActive?: boolean;
+    sortOrder?: number;
+    defaultPrice?: number | null;
+    categoryId?: string | null;
+  } = {};
   if (input.name !== undefined) {
     const name = clean(input.name);
     if (!name) throw Errors.validation("Название работы не может быть пустым");
@@ -81,6 +160,7 @@ export async function updateWorkCatalogItem(id: string, input: Partial<WorkCatal
   if (input.isActive !== undefined) data.isActive = input.isActive;
   if (input.sortOrder !== undefined) data.sortOrder = input.sortOrder;
   if (input.defaultPrice !== undefined) data.defaultPrice = cleanPrice(input.defaultPrice);
+  if (input.categoryId !== undefined) data.categoryId = await resolveCategoryId(input.categoryId);
   return prisma.workCatalogItem.update({ where: { id }, data });
 }
 
