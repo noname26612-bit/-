@@ -5,9 +5,10 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
-import { Phone, Navigation, Camera, X } from "lucide-react";
+import { Phone, Navigation, Camera, X, FileText } from "lucide-react";
 import { fetcher, apiSend, apiUpload } from "@/lib/fetcher";
 import { compressImage } from "@/lib/image-compress";
+import { actState } from "@/domain/act";
 import type { DriverDTO, TaskDetailDTO, TaskTypeDTO } from "@/lib/task-dto";
 import type { TaskStatus } from "@/generated/prisma/enums";
 import {
@@ -16,6 +17,7 @@ import {
   PASS_BADGE,
   PASS_LABEL,
   PAYMENT_LABEL,
+  actBadge,
   formatDate,
   formatDateTime,
   formatMoney,
@@ -45,6 +47,11 @@ const KIND_LABEL: Record<string, string> = {
   reschedule: "Перенос",
   auto_date: "Дата",
   comment: "Комментарий",
+  payment_received: "Оплата",
+  worksheet_submitted: "Ведомость",
+  worksheet_priced: "Расценка",
+  worksheet_signed: "Акт",
+  worksheet_unsigned: "Акт",
 };
 
 type ActionKind = "hold" | "cancel" | "reschedule" | null;
@@ -69,6 +76,7 @@ export function TaskDetailClient({
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const docRef = useRef<HTMLInputElement | null>(null); // input для акта (этап 14): фото или PDF
   const [prices, setPrices] = useState<Record<string, string>>({}); // расценка ведомости (этап 13)
 
   if (isLoading) return <p className="p-6 text-sm text-neutral-400">Загрузка…</p>;
@@ -109,6 +117,21 @@ export function TaskDetailClient({
       }
     });
   }
+  // Акт (этап 14): диспетчер тоже может приложить подписанный бланк (например, акт прислали в офис).
+  // Фото сжимаем, PDF — как есть; kind=DOCUMENT.
+  function uploadDoc(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    void run(async () => {
+      for (const file of Array.from(files)) {
+        const isPdf = file.type === "application/pdf";
+        const blob = isPdf ? file : await compressImage(file);
+        const form = new FormData();
+        form.append("file", blob, isPdf ? "akt.pdf" : "akt.jpg");
+        form.append("kind", "DOCUMENT");
+        await apiUpload(`${key}/attachments`, form);
+      }
+    });
+  }
   const removePhoto = (id: string) => run(() => apiSend(`/api/attachments/${id}`, "DELETE"));
 
   const transition = (toStatus: TaskStatus, r?: string) =>
@@ -141,6 +164,19 @@ export function TaskDetailClient({
     const val = prices[w.id] ?? (w.price != null ? String(w.price) : "");
     return s + (Number.parseInt(val, 10) || 0) * w.quantity;
   }, 0);
+
+  // Акт (этап 14, PRD §13): документы (DOCUMENT) отделены от фото — PDF открывается ссылкой, не <img>.
+  const photos = task.attachments.filter((a) => a.kind === "PHOTO");
+  const docs = task.attachments.filter((a) => a.kind === "DOCUMENT");
+  const act = actBadge(
+    actState({
+      requiresSignedDoc: task.requiresSignedDoc,
+      actWaivedNote: task.actWaivedNote,
+      hasSignedDoc: docs.length > 0,
+    }),
+    task.status === "DONE",
+  );
+  const showActSection = task.requiresSignedDoc || docs.length > 0;
 
   return (
     <div className="mx-auto max-w-3xl p-4">
@@ -200,16 +236,15 @@ export function TaskDetailClient({
           <Badge className={PASS_BADGE[task.passStatus]}>{PASS_LABEL[task.passStatus]}</Badge>
         </Row>
         {task.description ? <Row label="Описание">{task.description}</Row> : null}
-        {task.requiresSignedDoc ? (
+        {act ? (
           <Row label="Акт">
-            {task.attachments.some((a) => a.kind === "DOCUMENT") ? (
-              <Badge className="bg-green-100 text-green-700">приложен</Badge>
-            ) : (
-              <Badge className="bg-amber-100 text-amber-800">не приложен</Badge>
-            )}
+            <span className="inline-flex items-center gap-1.5">
+              <Badge className={act.className}>{act.label}</Badge>
+              {task.actWaivedNote ? (
+                <span className="text-neutral-500">· {task.actWaivedNote}</span>
+              ) : null}
+            </span>
           </Row>
-        ) : task.actWaivedNote ? (
-          <Row label="Акт">Не требуется · {task.actWaivedNote}</Row>
         ) : null}
         {task.holdReason ? <Row label="Причина паузы">{task.holdReason}</Row> : null}
         {task.cancelReason ? <Row label="Причина отмены">{task.cancelReason}</Row> : null}
@@ -310,10 +345,70 @@ export function TaskDetailClient({
         </section>
       ) : null}
 
+      {/* Акт (этап 14, PRD §13): подписанный бумажный бланк — фото или скан. Отдельно от фото-галереи,
+          чтобы PDF открывался ссылкой, а не ломался как <img>; здесь же — признак комплектности. */}
+      {showActSection ? (
+        <section className="mt-6" data-testid="act-section">
+          <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-neutral-700">
+            Акт
+            {act ? <Badge className={act.className}>{act.label}</Badge> : null}
+          </h2>
+          {docs.length > 0 ? (
+            <ul className="flex flex-col gap-1.5">
+              {docs.map((a) => (
+                <li key={a.id} className="flex items-center gap-2">
+                  <a
+                    href={`/api/attachments/${a.id}`}
+                    target="_blank"
+                    rel="noopener"
+                    className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 underline"
+                  >
+                    <FileText className="h-4 w-4" /> Акт{" "}
+                    {a.mimeType === "application/pdf" ? "(PDF)" : "(фото)"}
+                  </a>
+                  {task.status !== "DONE" ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => removePhoto(a.id)}
+                      aria-label="Удалить акт"
+                      className="p-1 text-neutral-400 disabled:opacity-50"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-neutral-500">
+              {task.requiresSignedDoc
+                ? "Акт ещё не приложен. Обычно прикладывает водитель на объекте; можно приложить и здесь."
+                : "Акт по этой заявке не требуется."}
+            </p>
+          )}
+          {task.status !== "CANCELLED" ? (
+            <Button variant="secondary" className="mt-2" disabled={busy} onClick={() => docRef.current?.click()}>
+              <FileText className="h-4 w-4" /> Приложить акт
+            </Button>
+          ) : null}
+          <input
+            ref={docRef}
+            type="file"
+            accept="image/*,application/pdf"
+            className="hidden"
+            onChange={(e) => {
+              uploadDoc(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        </section>
+      ) : null}
+
       <section className="mt-6">
         <h2 className="mb-2 text-sm font-semibold text-neutral-700">Фото</h2>
         <div className="flex flex-wrap gap-2">
-          {task.attachments.map((a) => (
+          {photos.map((a) => (
             <div key={a.id} className="relative">
               <a href={`/api/attachments/${a.id}`} target="_blank" rel="noopener">
                 <img

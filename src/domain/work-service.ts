@@ -3,6 +3,7 @@
 // водитель работает только со своей задачей (canViewTask → чужая отдаёт 404). Правка возможна,
 // только пока ведомость в DRAFT; после «Отправить на расценку» (PRICING) — заблокировано.
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@/generated/prisma/client";
 import type { Role, WorksheetStatus } from "@/generated/prisma/enums";
 import { canViewTask } from "./authz";
 import { isDispatcherRole } from "./task-status";
@@ -199,6 +200,43 @@ export async function priceWorksheet(taskId: string, input: PricingInput, actor:
     actor.id,
   );
   return result;
+}
+
+// ───────────────────────────── Подписание акта (этап 14, PRD §13.4) ─────────────────────────────
+// Приложение фото подписанного бумажного акта закрывает цикл ведомости: PRICED → SIGNED. Вызывается
+// из attachment-service при добавлении/удалении DOCUMENT-вложения, ВНУТРИ его транзакции. Обе
+// функции читают актуальный статус ведомости заново внутри транзакции (а не из снимка снаружи) —
+// чтобы решение принималось по свежему состоянию. Для типов без расценки (worksheetStatus=null) и
+// опись-актов — no-op: их комплектность считается по самому наличию DOCUMENT-вложения (actState).
+
+/** PRICED → SIGNED при приложении акта. Никакой другой статус не трогаем (цикл только вперёд). */
+export async function markWorksheetSigned(
+  tx: Prisma.TransactionClient,
+  taskId: string,
+  actorId: string,
+): Promise<void> {
+  const task = await tx.task.findUnique({ where: { id: taskId }, select: { worksheetStatus: true } });
+  if (task?.worksheetStatus !== "PRICED") return;
+  await tx.task.update({ where: { id: taskId }, data: { worksheetStatus: "SIGNED" } });
+  await tx.taskEvent.create({
+    data: { taskId, actorId, kind: "worksheet_signed", comment: "Акт приложен — ведомость подписана" },
+  });
+}
+
+/** Откат SIGNED → PRICED, если удалён последний DOCUMENT-акт (до завершения задачи). */
+export async function revertWorksheetSignIfNoDocs(
+  tx: Prisma.TransactionClient,
+  taskId: string,
+  actorId: string,
+): Promise<void> {
+  const task = await tx.task.findUnique({ where: { id: taskId }, select: { worksheetStatus: true } });
+  if (task?.worksheetStatus !== "SIGNED") return;
+  const remaining = await tx.attachment.count({ where: { taskId, kind: "DOCUMENT" } });
+  if (remaining > 0) return;
+  await tx.task.update({ where: { id: taskId }, data: { worksheetStatus: "PRICED" } });
+  await tx.taskEvent.create({
+    data: { taskId, actorId, kind: "worksheet_unsigned", comment: "Акт удалён — ведомость снова на подписи" },
+  });
 }
 
 // Очередь «на расценке» для диспетчера: задачи с отправленной, но не расценённой ведомостью.

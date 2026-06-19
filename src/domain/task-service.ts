@@ -51,10 +51,18 @@ export type ListFilters = {
   q?: string;
 };
 
-// Краткие связи для карточек/списков.
+// Краткие связи для карточек/списков (используется и записями: createTask/assign/transition...).
 const taskInclude = {
   type: true,
   assignee: { select: { id: true, name: true, login: true } },
+} satisfies Prisma.TaskInclude;
+
+// Списки-чтения дополнительно тянут число приложенных актов (DOCUMENT-вложений) — лёгкий
+// фильтрованный _count, чтобы показать признак комплектности акта (этап 14, PRD §13). filePath
+// не раскрывается. Записи используют taskInclude без счётчика (им признак не нужен).
+const taskListInclude = {
+  ...taskInclude,
+  _count: { select: { attachments: { where: { kind: "DOCUMENT" } } } },
 } satisfies Prisma.TaskInclude;
 
 // Полная карточка с историей.
@@ -97,6 +105,16 @@ const taskDetailInclude = {
 export type TaskListItem = Prisma.TaskGetPayload<{ include: typeof taskInclude }>;
 export type TaskDetail = Prisma.TaskGetPayload<{ include: typeof taskDetailInclude }>;
 
+// Элемент списка для клиента: payload с _count, развёрнутым в булев флаг hasSignedDoc (этап 14).
+type TaskListPayload = Prisma.TaskGetPayload<{ include: typeof taskListInclude }>;
+export type TaskListWire = Omit<TaskListPayload, "_count"> & { hasSignedDoc: boolean };
+
+// Разворачивает фильтрованный _count в поле hasSignedDoc (и убирает служебный _count из ответа).
+function withActFlag(t: TaskListPayload): TaskListWire {
+  const { _count, ...rest } = t;
+  return { ...rest, hasSignedDoc: _count.attachments > 0 };
+}
+
 function clean(v: string | null | undefined): string | null {
   if (v === null || v === undefined) return null;
   const t = v.trim();
@@ -113,7 +131,7 @@ function parseDate(s: string | null | undefined): Date | null {
 
 // --- Чтения ----------------------------------------------------------------
 
-export async function listTasks(filters: ListFilters): Promise<TaskListItem[]> {
+export async function listTasks(filters: ListFilters): Promise<TaskListWire[]> {
   const and: Prisma.TaskWhereInput[] = [];
 
   if (filters.undatedOnly) {
@@ -159,11 +177,12 @@ export async function listTasks(filters: ListFilters): Promise<TaskListItem[]> {
     and.push({ OR: or });
   }
 
-  return prisma.task.findMany({
+  const rows = await prisma.task.findMany({
     where: and.length ? { AND: and } : {},
-    include: taskInclude,
+    include: taskListInclude,
     orderBy: [{ priority: "desc" }, { scheduledDate: "asc" }, { number: "asc" }],
   });
+  return rows.map(withActFlag);
 }
 
 /**
@@ -174,12 +193,12 @@ export async function listTasks(filters: ListFilters): Promise<TaskListItem[]> {
 export async function listMyTasks(
   actor: Actor,
   opts: { today: string; scope?: MyTasksScope },
-): Promise<TaskListItem[]> {
+): Promise<TaskListWire[]> {
   const today = parseDate(opts.today);
   if (!today) throw Errors.validation("Некорректная дата");
-  return prisma.task.findMany({
+  const rows = await prisma.task.findMany({
     where: myTasksWhere(actor.id, today, opts.scope ?? "today"),
-    include: taskInclude,
+    include: taskListInclude,
     orderBy: [
       { priority: "desc" },
       { scheduledDate: "asc" },
@@ -187,11 +206,12 @@ export async function listMyTasks(
       { number: "asc" },
     ],
   });
+  return rows.map(withActFlag);
 }
 
 export type BoardAttention = {
-  overdue: TaskListItem[]; // незавершённые с прошедшей датой
-  tomorrowPasses: TaskListItem[]; // на завтра пропуск «нужен, не заказан» (PRD §6)
+  overdue: TaskListWire[]; // незавершённые с прошедшей датой
+  tomorrowPasses: TaskListWire[]; // на завтра пропуск «нужен, не заказан» (PRD §6)
 };
 
 /**
@@ -208,16 +228,16 @@ export async function listAttention(today: string): Promise<BoardAttention> {
   const [overdue, tomorrowPasses] = await Promise.all([
     prisma.task.findMany({
       where: overdueWhere(todayDate),
-      include: taskInclude,
+      include: taskListInclude,
       orderBy: [{ scheduledDate: "asc" }, { priority: "desc" }, { number: "asc" }],
     }),
     prisma.task.findMany({
       where: tomorrowPassWhere(tomorrow),
-      include: taskInclude,
+      include: taskListInclude,
       orderBy: [{ priority: "desc" }, { number: "asc" }],
     }),
   ]);
-  return { overdue, tomorrowPasses };
+  return { overdue: overdue.map(withActFlag), tomorrowPasses: tomorrowPasses.map(withActFlag) };
 }
 
 /** Карточка задачи с историей. Изоляция: водителю чужая задача отдаёт 404. */

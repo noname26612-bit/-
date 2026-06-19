@@ -6,7 +6,8 @@ import useSWR from "swr";
 import { Plus } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
 import type { DriverDTO, TaskDTO, TaskTypeDTO } from "@/lib/task-dto";
-import { STATUS_BADGE, STATUS_LABEL, STATUS_ORDER, formatDate } from "@/lib/task-ui";
+import { actState } from "@/domain/act";
+import { STATUS_BADGE, STATUS_LABEL, STATUS_ORDER, actBadge, formatDate } from "@/lib/task-ui";
 import { TypeIcon } from "@/components/type-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -96,12 +97,13 @@ export function AllTasksClient({
               <th className="px-3 py-2">Дата</th>
               <th className="px-3 py-2">Исполнитель</th>
               <th className="px-3 py-2">Статус</th>
+              <th className="px-3 py-2">Акт</th>
             </tr>
           </thead>
           <tbody>
             {error && tasks.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-3 py-8 text-center">
+                <td colSpan={8} className="px-3 py-8 text-center">
                   <p className="text-sm text-red-600">Не удалось загрузить список.</p>
                   <button
                     type="button"
@@ -114,7 +116,7 @@ export function AllTasksClient({
               </tr>
             ) : tasks.length === 0 && !isLoading ? (
               <tr>
-                <td colSpan={7} className="px-3 py-8 text-center text-neutral-400">
+                <td colSpan={8} className="px-3 py-8 text-center text-neutral-400">
                   Задач не найдено
                 </td>
               </tr>
@@ -143,6 +145,9 @@ export function AllTasksClient({
                   <td className="px-3 py-2">
                     <Badge className={STATUS_BADGE[t.status]}>{STATUS_LABEL[t.status]}</Badge>
                   </td>
+                  <td className="px-3 py-2">
+                    <ActCell task={t} />
+                  </td>
                 </tr>
               ))
             )}
@@ -159,4 +164,18 @@ export function AllTasksClient({
       />
     </div>
   );
+}
+
+// Признак комплектности акта в списке (этап 14, PRD §13). hasSignedDoc приходит со списком.
+function ActCell({ task }: { task: TaskDTO }) {
+  const badge = actBadge(
+    actState({
+      requiresSignedDoc: task.requiresSignedDoc,
+      actWaivedNote: task.actWaivedNote,
+      hasSignedDoc: task.hasSignedDoc ?? false,
+    }),
+    task.status === "DONE",
+  );
+  if (!badge) return <span className="text-neutral-300">—</span>;
+  return <Badge className={badge.className}>{badge.label}</Badge>;
 }

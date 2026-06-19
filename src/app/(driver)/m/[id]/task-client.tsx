@@ -43,6 +43,10 @@ const KIND_LABEL: Record<string, string> = {
   auto_date: "Дата",
   comment: "Комментарий",
   payment_received: "Оплата",
+  worksheet_submitted: "Ведомость",
+  worksheet_priced: "Расценка",
+  worksheet_signed: "Акт",
+  worksheet_unsigned: "Акт",
 };
 
 type StatusExtra = {
@@ -532,6 +536,10 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
             ) : ws === "PRICED" ? (
               <p className="mt-2 rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700">
                 Цены проставлены. Итог: {worksheetTotal.toLocaleString("ru")} ₽
+              </p>
+            ) : ws === "SIGNED" ? (
+              <p className="mt-2 rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700">
+                Итог: {worksheetTotal.toLocaleString("ru")} ₽ · акт приложен ✓
               </p>
             ) : null}
           </section>

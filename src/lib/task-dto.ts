@@ -39,6 +39,8 @@ export type TaskDTO = {
   priority: boolean;
   requiresSignedDoc: boolean; // требование акта на уровне задачи (снимок из типа, override галочкой)
   actWaivedNote: string | null; // причина снятия требования акта (если снят диспетчером)
+  hasSignedDoc?: boolean; // приложен ли подписанный акт (этап 14): есть DOCUMENT-вложение. В списках
+  // выставляется сервером; в карточке (TaskDetailDTO) считается из attachments на клиенте.
   worksheetStatus: WorksheetStatus | null; // ведомость работ (этап 12): null — не нужна для типа
   status: TaskStatus;
   assigneeId: string | null;
