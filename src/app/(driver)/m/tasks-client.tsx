@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { Phone, Navigation } from "lucide-react";
-import { fetcher } from "@/lib/fetcher";
+import { fetcher, apiSend, ApiError } from "@/lib/fetcher";
 import type { TaskDTO } from "@/lib/task-dto";
 import type { TaskStatus } from "@/generated/prisma/enums";
 import {
@@ -52,6 +52,9 @@ export function DriverTasksClient({ showPayroll = true }: { showPayroll?: boolea
           </Link>
         </div>
       ) : null}
+
+      {/* Смена водителя (этап C): открыть утром (фактическое начало дня) → диспетчер подтвердит → закрыть. */}
+      <ShiftBlock today={today} />
 
       {/* Вкладки — крупные тач-цели */}
       <div className="mb-3 grid grid-cols-2 gap-1 rounded-xl bg-neutral-100 p-1">
@@ -105,6 +108,102 @@ export function DriverTasksClient({ showPayroll = true }: { showPayroll?: boolea
         </ul>
       )}
     </main>
+  );
+}
+
+type ShiftDTO = {
+  id: string;
+  status: "REQUESTED" | "OPEN" | "CLOSED";
+  openedAt: string;
+  confirmedAt: string | null;
+  closedAt: string | null;
+};
+
+// «чч:мм» из ISO в местной зоне (для времени открытия/закрытия смены).
+function hhmm(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// Блок смены вверху «Мои задачи»: открыть смену (фактическое начало дня), статус ожидания
+// подтверждения диспетчером, закрыть смену. Цвета — по ui-guidelines: янтарь = ждёт подтверждения,
+// зелёный = смена идёт, графит = закрыта/нет.
+function ShiftBlock({ today }: { today: string }) {
+  const { data: shift, isLoading, mutate } = useSWR<ShiftDTO | null>(
+    `/api/my/shift?date=${today}`,
+    fetcher,
+    { refreshInterval: 10_000 },
+  );
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function act(op: "open" | "close") {
+    setBusy(true);
+    setErr(null);
+    try {
+      await apiSend("/api/my/shift", "POST", { op, today });
+      await mutate();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Не удалось");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (shift === undefined && isLoading) {
+    return <div className="mb-3 h-12 rounded-xl border border-neutral-200 bg-white" aria-hidden />;
+  }
+
+  if (!shift) {
+    return (
+      <div className="mb-3 rounded-xl border border-neutral-200 bg-white p-3">
+        <p className="text-sm text-neutral-500">Смена не открыта</p>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void act("open")}
+          className="mt-2 flex h-12 w-full items-center justify-center rounded-lg bg-indigo-600 text-base font-semibold text-white transition-colors active:bg-indigo-700 disabled:opacity-60"
+        >
+          Открыть смену
+        </button>
+        {err ? <p className="mt-1 text-sm text-red-600">{err}</p> : null}
+      </div>
+    );
+  }
+
+  if (shift.status === "CLOSED") {
+    return (
+      <div className="mb-3 rounded-xl border border-neutral-200 bg-white p-3 text-sm text-neutral-500">
+        Смена закрыта · {hhmm(shift.openedAt)}–{hhmm(shift.closedAt)}
+      </div>
+    );
+  }
+
+  const requested = shift.status === "REQUESTED";
+  return (
+    <div
+      className={`mb-3 rounded-xl border p-3 ${
+        requested ? "border-amber-300 bg-amber-50" : "border-green-300 bg-green-50"
+      }`}
+    >
+      <p className={`text-sm font-medium ${requested ? "text-amber-800" : "text-green-800"}`}>
+        {requested
+          ? `Открыта в ${hhmm(shift.openedAt)} · ждёт подтверждения диспетчера`
+          : `Смена идёт с ${hhmm(shift.openedAt)}`}
+      </p>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => void act("close")}
+        className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-lg border border-neutral-300 bg-white text-base font-medium text-neutral-800 disabled:opacity-60"
+      >
+        Закрыть смену
+      </button>
+      {err ? <p className="mt-1 text-sm text-red-600">{err}</p> : null}
+    </div>
   );
 }
 

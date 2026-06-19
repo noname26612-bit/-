@@ -14,3 +14,11 @@ const SQL = `UPDATE \\"Task\\" SET status='DONE', \\"completedAt\\"=now() WHERE 
 export async function resetActiveTasks(): Promise<void> {
   execSync(`docker exec ${CONTAINER} psql -U vanmark -d vanmark -c "${SQL}"`, { stdio: "ignore" });
 }
+
+// Сброс смен (этап C): @@unique(driverId, date) — повторный прогон в тот же день иначе натыкается на
+// смену прошлого теста. Удаляем все смены (в dev-БД они только тестовые).
+export async function resetShifts(): Promise<void> {
+  execSync(`docker exec ${CONTAINER} psql -U vanmark -d vanmark -c "DELETE FROM \\"Shift\\""`, {
+    stdio: "ignore",
+  });
+}

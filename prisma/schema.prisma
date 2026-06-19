@@ -65,6 +65,14 @@ enum WorksheetStatus {
   SIGNED // подписанный акт приложен (этап 14)
 }
 
+// Смена водителя (этап C, переработка механики). Водитель «открывает смену» (фактическое начало дня) →
+// диспетчер подтверждает приход (он физически на базе) → водитель «закрывает смену» (конец дня).
+enum ShiftStatus {
+  REQUESTED // открыта водителем, ждёт подтверждения диспетчера
+  OPEN // диспетчер подтвердил — смена идёт
+  CLOSED // водитель закрыл смену
+}
+
 model User {
   id             String               @id @default(uuid())
   login          String               @unique // латиница, вводится при входе
@@ -89,6 +97,7 @@ model User {
   payProfile      DriverPayProfile?  @relation("payProfile") // денежный профиль (только водители)
   payStatements   PayrollStatement[] @relation("payStatements") // закрытые расчёты за месяцы
   uiPrefs         UiPreference[] // настройки интерфейса (раскладка доски/планирования)
+  shifts          Shift[]            @relation("shiftDriver") // смены водителя (этап C)
 }
 
 // Справочник типов задач (PRD §3). Новые типы заводит админ без правки кода.
@@ -267,6 +276,26 @@ model PushSubscription {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+// Смена водителя (этап C). «Открыть смену» фиксирует фактическое начало рабочего дня (момент нажатия
+// водителя), диспетчер подтверждает приход (он на базе). «Закрыть смену» — конец дня. Одна смена на
+// водителя в день. Время начала/конца — основа учёта отработанного и простоя (этап D). Изоляция как у
+// задач: driverId берётся ТОЛЬКО из сессии (CLAUDE.md правило 1). confirmedById — uuid без навигации.
+model Shift {
+  id            String      @id @default(uuid())
+  driverId      String
+  driver        User        @relation("shiftDriver", fields: [driverId], references: [id])
+  date          DateTime    @db.Date // рабочий день — локальная дата открытия (МСК)
+  status        ShiftStatus @default(REQUESTED)
+  openedAt      DateTime // фактическое время начала смены (момент нажатия водителя)
+  confirmedById String? // диспетчер, подтвердивший открытие
+  confirmedAt   DateTime?
+  closedAt      DateTime?
+  createdAt     DateTime    @default(now())
+
+  @@unique([driverId, date]) // одна смена на водителя в день
+  @@index([date, status])
 }
 
 // ───────────────────────────── KPI и зарплата (Фаза 1.5) ─────────────────────────────
