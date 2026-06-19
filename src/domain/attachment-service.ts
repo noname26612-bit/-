@@ -6,6 +6,7 @@ import type { AttachmentKind, Role } from "@/generated/prisma/enums";
 import { canViewTask } from "./authz";
 import { isDispatcherRole } from "./task-status";
 import { validateUpload } from "./attachments";
+import { markWorksheetSigned, revertWorksheetSignIfNoDocs } from "./work-service";
 import { Errors } from "./errors";
 import { saveUpload, readUpload, deleteUpload } from "@/lib/uploads";
 
@@ -52,19 +53,26 @@ export async function addAttachment(taskId: string, actor: Actor, input: NewAtta
   }
 
   const filePath = await saveUpload(input.bytes, input.mimeType);
-  return prisma.attachment.create({
-    data: {
-      taskId,
-      kind,
-      filePath,
-      mimeType: input.mimeType,
-      sizeBytes: input.sizeBytes,
-      createdById: actor.id,
-      lat: input.lat ?? null,
-      lng: input.lng ?? null,
-    },
-    select: attachmentSelect,
-  });
+  const data = {
+    taskId,
+    kind,
+    filePath,
+    mimeType: input.mimeType,
+    sizeBytes: input.sizeBytes,
+    createdById: actor.id,
+    lat: input.lat ?? null,
+    lng: input.lng ?? null,
+  };
+  // Акт (DOCUMENT) на уже расценённой ведомости закрывает её цикл PRICED→SIGNED (PRD §13.4, этап 14).
+  // Создание вложения и смена статуса — атомарно, в одной транзакции.
+  if (kind === "DOCUMENT") {
+    return prisma.$transaction(async (tx) => {
+      const created = await tx.attachment.create({ data, select: attachmentSelect });
+      await markWorksheetSigned(tx, taskId, actor.id);
+      return created;
+    });
+  }
+  return prisma.attachment.create({ data, select: attachmentSelect });
 }
 
 /** Файл для раздачи. Изоляция: чужая задача → 404. */
@@ -86,6 +94,8 @@ export async function deleteAttachment(attachmentId: string, actor: Actor): Prom
     select: {
       filePath: true,
       createdById: true,
+      kind: true,
+      taskId: true,
       task: { select: { assigneeId: true, status: true } },
     },
   });
@@ -94,6 +104,12 @@ export async function deleteAttachment(attachmentId: string, actor: Actor): Prom
   if (att.createdById !== actor.id && !isDispatcherRole(actor.role)) throw Errors.forbidden();
   if (att.task.status === "DONE") throw Errors.validation("Нельзя удалить фото завершённой задачи");
 
-  await prisma.attachment.delete({ where: { id: attachmentId } });
+  // Удаление последнего акта откатывает ведомость SIGNED→PRICED (этап 14) — атомарно с удалением.
+  await prisma.$transaction(async (tx) => {
+    await tx.attachment.delete({ where: { id: attachmentId } });
+    if (att.kind === "DOCUMENT") {
+      await revertWorksheetSignIfNoDocs(tx, att.taskId, actor.id);
+    }
+  });
   await deleteUpload(att.filePath);
 }

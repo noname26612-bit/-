@@ -338,7 +338,7 @@ model PayrollStatement {
 | GET /api/tasks/:id | Д, В(своя) | карточка + события + вложения |
 | POST /api/tasks/:id/transition {toStatus, comment?, lat?, lng?, paymentConfirmed?, paymentAmount?} | по матрице | смена статуса + событие + пуш; DONE: фото (requiresPhoto) и «деньги получены» (ON_SITE) — серверные гейты |
 | POST /api/tasks/:id/comments | Д, В(своя) | комментарий |
-| POST /api/tasks/:id/attachments (multipart) | Д, В(своя) | фото (клиент сжимает до ~1920px) |
+| POST /api/tasks/:id/attachments (multipart, `kind=PHOTO\|DOCUMENT`) | Д, В(своя) | фото (сжатие ~1920px) или акт (этап 14: DOCUMENT — фото/PDF подписанного бланка). Приложение акта на расценённой ведомости закрывает её цикл PRICED→SIGNED (PRD §13.4); удаление последнего акта откатывает SIGNED→PRICED |
 | GET /api/attachments/:id | Д, В(своя) | файл с проверкой прав (nosniff, не из public/) |
 | DELETE /api/attachments/:id | Д, В(автор, до завершения) | удалить вложение |
 | POST /api/push/subscribe | Д, В | сохранить подписку |

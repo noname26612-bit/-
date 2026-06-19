@@ -6,6 +6,7 @@
 // янтарный = требует внимания сейчас (Ждёт / нужен пропуск). Все остальные статусы — нейтральный
 // графит, различаются словом-подписью. Бейджи контурные (border + text), без заливок и «таблеток».
 import type { PassStatus, PaymentType, TaskStatus } from "@/generated/prisma/enums";
+import type { ActState } from "@/domain/act";
 
 export const STATUS_LABEL: Record<TaskStatus, string> = {
   NEW: "Новая",
@@ -60,6 +61,27 @@ export const PASS_BADGE: Record<PassStatus, string> = {
   NEEDED: "border border-amber-500 text-amber-700",
   ORDERED: "border border-slate-300 text-slate-600",
 };
+
+// Бейдж комплектности акта (этап 14, PRD §13). Цвет — строго по ui-guidelines: зелёный = готово
+// (приложен), янтарь = требует действия сейчас (нужен, но задача уже завершена без акта), графит =
+// нейтрально (ещё ожидается до завершения / снят диспетчером). null — показывать нечего (акт не нужен).
+export function actBadge(
+  state: ActState,
+  isDone: boolean,
+): { label: string; className: string } | null {
+  switch (state) {
+    case "COMPLETE":
+      return { label: "Акт приложен", className: "border border-green-600 text-green-700" };
+    case "PENDING":
+      return isDone
+        ? { label: "Акт не приложен", className: "border border-amber-500 text-amber-700" }
+        : { label: "Акт ожидается", className: "border border-slate-300 text-slate-500" };
+    case "WAIVED":
+      return { label: "Акт не нужен", className: "border border-slate-300 text-slate-500" };
+    case "NOT_REQUIRED":
+      return null;
+  }
+}
 
 export const PAYMENT_LABEL: Record<PaymentType, string> = {
   NONE: "Без оплаты",
