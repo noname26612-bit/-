@@ -7,6 +7,7 @@ import { ChevronLeft, ChevronRight, RefreshCw, Move } from "lucide-react";
 import { fetcher, apiSend } from "@/lib/fetcher";
 import type { DriverDTO, TaskDTO } from "@/lib/task-dto";
 import { STATUS_BADGE, STATUS_BAR, STATUS_LABEL, addDaysISO, formatDate } from "@/lib/task-ui";
+import { formatMinutes } from "@/domain/capacity";
 import { TypeIcon } from "@/components/type-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,12 +24,22 @@ function dayHeader(iso: string): { wd: string; day: number } {
   return { wd: WD[d.getUTCDay()], day: d.getUTCDate() };
 }
 
+// Цвет индикатора загрузки ячейки по доле от рабочего дня (Фаза 2, §14.4).
+function loadChipClass(minutes: number, workday: number): string {
+  const pct = workday > 0 ? minutes / workday : 0;
+  if (pct > 1) return "bg-red-50 text-red-700";
+  if (pct >= 0.7) return "bg-amber-50 text-amber-700";
+  return "bg-green-50 text-green-700";
+}
+
 export function PlanningClient({
   drivers,
   today,
+  workdayMinutes,
 }: {
   drivers: DriverDTO[];
   today: string;
+  workdayMinutes: number;
 }) {
   const [weekStart, setWeekStart] = useState(today);
   const weekEnd = addDaysISO(weekStart, HORIZON_DAYS - 1);
@@ -171,6 +182,7 @@ export function PlanningClient({
                   today={today}
                   cellTasks={cellTasks}
                   onPlan={plan}
+                  workdayMinutes={workdayMinutes}
                 />
               ))}
             </div>
@@ -190,12 +202,14 @@ function RowCells({
   today,
   cellTasks,
   onPlan,
+  workdayMinutes,
 }: {
   row: Row;
   days: string[];
   today: string;
   cellTasks: (row: Row, day: string) => TaskDTO[];
   onPlan: (taskId: string, day: string, assigneeId: string | null) => void;
+  workdayMinutes: number;
 }) {
   return (
     <>
@@ -211,6 +225,9 @@ function RowCells({
           isToday={day === today}
           tasks={cellTasks(row, day)}
           onDropTask={(taskId) => onPlan(taskId, day, row.driverId)}
+          // Индикатор загрузки — только в строках водителей (в «Без водителя» он не имеет смысла).
+          showLoad={row.driverId !== null}
+          workdayMinutes={workdayMinutes}
         />
       ))}
     </>
@@ -223,14 +240,20 @@ function Cell({
   isToday,
   tasks,
   onDropTask,
+  showLoad,
+  workdayMinutes,
 }: {
   rowKey: string;
   day: string;
   isToday: boolean;
   tasks: TaskDTO[];
   onDropTask: (taskId: string) => void;
+  showLoad: boolean;
+  workdayMinutes: number;
 }) {
   const [over, setOver] = useState(false);
+  // Сумма оценок задач ячейки (Фаза 2, §14.4) — из уже загруженных задач, без доп. запроса.
+  const loadMinutes = tasks.reduce((s, t) => s + (t.estimatedMinutes ?? 0), 0);
   return (
     <div
       data-testid={`cell-${rowKey}-${day}`}
@@ -253,6 +276,18 @@ function Cell({
             : "border-neutral-200 bg-neutral-50"
       }`}
     >
+      {showLoad && tasks.length > 0 ? (
+        <div
+          data-testid="cell-load"
+          className={`flex items-center justify-between rounded px-1 text-[10px] font-medium ${loadChipClass(
+            loadMinutes,
+            workdayMinutes,
+          )}`}
+        >
+          <span>≈ {formatMinutes(loadMinutes)}</span>
+          <span>{tasks.length} зад.</span>
+        </div>
+      ) : null}
       {tasks.map((t) => (
         <PlanCard key={t.id} task={t} />
       ))}
