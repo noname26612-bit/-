@@ -69,6 +69,7 @@ export function TaskDetailClient({
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const [prices, setPrices] = useState<Record<string, string>>({}); // расценка ведомости (этап 13)
 
   if (isLoading) return <p className="p-6 text-sm text-neutral-400">Загрузка…</p>;
   if (error || !task)
@@ -121,9 +122,25 @@ export function TaskDetailClient({
       await apiSend(key + "/comments", "POST", { text: comment });
       setComment("");
     });
+  const savePricing = () =>
+    run(async () => {
+      const items = (task?.workItems ?? []).map((w) => ({
+        id: w.id,
+        price: Number.parseInt(prices[w.id] ?? (w.price != null ? String(w.price) : "0"), 10) || 0,
+      }));
+      await apiSend(`${key}/worksheet/pricing`, "POST", { items });
+    });
 
   const forward = NEXT_FORWARD[task.status];
   const isTerminal = task.status === "DONE" || task.status === "CANCELLED";
+  const pricingVisible =
+    task.type.requiresPricing &&
+    task.workItems.length > 0 &&
+    (task.worksheetStatus === "PRICING" || task.worksheetStatus === "PRICED");
+  const pricingTotal = task.workItems.reduce((s, w) => {
+    const val = prices[w.id] ?? (w.price != null ? String(w.price) : "");
+    return s + (Number.parseInt(val, 10) || 0) * w.quantity;
+  }, 0);
 
   return (
     <div className="mx-auto max-w-3xl p-4">
@@ -244,6 +261,55 @@ export function TaskDetailClient({
       {actionError ? <p className="mt-2 text-sm text-red-600">{actionError}</p> : null}
 
       {/* Фото — отчётные (от исполнителя) и приложенные при постановке (от диспетчера) */}
+      {/* Расценка ведомости — диспетчер ставит цены по позициям (этап 13, PRD §13) */}
+      {pricingVisible ? (
+        <section className="mt-6">
+          <h2 className="mb-2 text-sm font-semibold text-neutral-700">
+            Расценка ведомости {task.worksheetStatus === "PRICING" ? "· ждёт цен" : "· расценено"}
+          </h2>
+          <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-neutral-200 text-xs text-neutral-400">
+                <tr>
+                  <th className="px-3 py-2">Работа</th>
+                  <th className="px-3 py-2">Кол-во</th>
+                  <th className="px-3 py-2">Цена, ₽</th>
+                  <th className="px-3 py-2 text-right">Сумма</th>
+                </tr>
+              </thead>
+              <tbody>
+                {task.workItems.map((w) => {
+                  const val = prices[w.id] ?? (w.price != null ? String(w.price) : "");
+                  const sum = (Number.parseInt(val, 10) || 0) * w.quantity;
+                  return (
+                    <tr key={w.id} className="border-b border-neutral-100 last:border-0">
+                      <td className="px-3 py-2">{w.name}</td>
+                      <td className="px-3 py-2">{w.quantity}</td>
+                      <td className="px-3 py-2">
+                        <Input
+                          type="number"
+                          value={val}
+                          disabled={busy}
+                          onChange={(e) => setPrices((p) => ({ ...p, [w.id]: e.target.value }))}
+                          className="h-8 w-28"
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-right">{sum.toLocaleString("ru")}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-2 flex items-center justify-between">
+            <span className="text-sm font-medium text-neutral-700">Итого: {pricingTotal.toLocaleString("ru")} ₽</span>
+            <Button data-testid="save-pricing" disabled={busy} onClick={savePricing}>
+              {task.worksheetStatus === "PRICED" ? "Сохранить цены" : "Подтвердить расценку"}
+            </Button>
+          </div>
+        </section>
+      ) : null}
+
       <section className="mt-6">
         <h2 className="mb-2 text-sm font-semibold text-neutral-700">Фото</h2>
         <div className="flex flex-wrap gap-2">

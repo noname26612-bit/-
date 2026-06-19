@@ -1,5 +1,20 @@
-// Разбор тела запросов ведомости/справочника работ из untrusted JSON (этап 12).
-import type { WorkItemInput, WorkCatalogInput } from "@/domain/work-service";
+// Разбор тела запросов ведомости/справочника работ из untrusted JSON (этап 12–13).
+import type { WorkItemInput, WorkCatalogInput, PricingInput } from "@/domain/work-service";
+
+export function parsePricingInput(body: Record<string, unknown>): PricingInput {
+  const items: { id: string; price: number }[] = [];
+  if (Array.isArray(body.items)) {
+    for (const raw of body.items) {
+      if (raw && typeof raw === "object") {
+        const r = raw as Record<string, unknown>;
+        if (typeof r.id === "string" && typeof r.price === "number" && Number.isFinite(r.price)) {
+          items.push({ id: r.id, price: Math.trunc(r.price) });
+        }
+      }
+    }
+  }
+  return { items };
+}
 
 export function parseWorkItemInput(body: Record<string, unknown>): WorkItemInput {
   const out: WorkItemInput = {};

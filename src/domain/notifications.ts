@@ -10,7 +10,7 @@ export type PushPayload = {
   tag?: string; // пуши с одинаковым tag схлопываются
 };
 
-export type TaskNotifyKind = "assigned" | "changed" | "rescheduled" | "cancelled";
+export type TaskNotifyKind = "assigned" | "changed" | "rescheduled" | "cancelled" | "priced";
 
 export type NotifiableTask = {
   id: string;
@@ -24,6 +24,7 @@ const TASK_TITLE: Record<TaskNotifyKind, string> = {
   changed: "Задача изменена",
   rescheduled: "Задача перенесена",
   cancelled: "Задача отменена",
+  priced: "Цены готовы",
 };
 
 export function buildTaskPayload(task: NotifiableTask, kind: TaskNotifyKind): PushPayload {
@@ -33,6 +34,18 @@ export function buildTaskPayload(task: NotifiableTask, kind: TaskNotifyKind): Pu
     body: `${typeName}${task.title}`,
     url: `/m/${task.id}`,
     tag: `task-${task.id}`,
+  };
+}
+
+// Пуш диспетчеру: водитель отправил ведомость на расценку (этап 13, PRD §13.1). Ведёт на карточку
+// задачи у диспетчера (не /m/), т.к. расценивает диспетчер.
+export function buildPricingRequestPayload(task: NotifiableTask): PushPayload {
+  const typeName = task.type?.name ? `${task.type.name}: ` : "";
+  return {
+    title: `Ведомость на расценку №${task.number}`,
+    body: `${typeName}${task.title} — водитель ждёт цен`,
+    url: `/tasks/${task.id}`,
+    tag: `pricing-${task.id}`,
   };
 }
 

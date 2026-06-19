@@ -104,6 +104,7 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
   const requiresPricing = t.type.requiresPricing; // ведомость работ + расценка (этап 12)
   const ws = t.worksheetStatus;
   const wsEditable = requiresPricing && (ws === null || ws === "DRAFT");
+  const worksheetTotal = t.workItems.reduce((s, w) => s + (w.price ?? 0) * w.quantity, 0);
   const onSite = t.paymentType === "ON_SITE";
   const canComplete = !onSite || paid; // фото — по желанию (не блокирует); акт — мягкая отметка KPI
 
@@ -453,6 +454,7 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
                   <li key={w.id} className="flex items-center justify-between gap-2 text-sm">
                     <span className="text-neutral-800">
                       {w.name} · {w.quantity} шт
+                      {w.price != null ? ` · ${(w.price * w.quantity).toLocaleString("ru")} ₽` : ""}
                     </span>
                     {wsEditable ? (
                       <button
@@ -528,7 +530,9 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
                 Отправлено на расценку — ждём цены от диспетчера.
               </p>
             ) : ws === "PRICED" ? (
-              <p className="mt-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">Цены проставлены.</p>
+              <p className="mt-2 rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700">
+                Цены проставлены. Итог: {worksheetTotal.toLocaleString("ru")} ₽
+              </p>
             ) : null}
           </section>
         ) : null}
