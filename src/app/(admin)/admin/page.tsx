@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-// Хаб администрирования (Артём). Отсюда — на доску, все задачи и справочник типов.
+// Хаб администрирования (Артём). Отсюда — на доску, сводку, KPI и справочники-настройки.
 export default function AdminPage() {
   return (
     <main className="mx-auto max-w-3xl p-6">
@@ -8,10 +8,11 @@ export default function AdminPage() {
       <p className="mt-1 text-sm text-neutral-500">Управление сервисом и быстрый переход к работе.</p>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <AdminLink href="/board" title="Доска «Сегодня»" desc="Задачи дня по водителям" />
-        <AdminLink href="/tasks" title="Все задачи" desc="Таблица с фильтрами и поиском" />
-        <AdminLink href="/admin/task-types" title="Типы задач" desc="Справочник: названия, акт, порядок" />
+        <AdminLink href="/summary" title="Сводка" desc="Итоги по водителям за период, выгрузка" />
+        <AdminLink href="/kpi" title="KPI / зарплата" desc="Зарплата, премии и штрафы по месяцам" />
+        <AdminLink href="/admin/task-types" title="Настройка типов задач" desc="Справочник: названия, акт, порядок" />
         <AdminLink href="/admin/work-catalog" title="Работы (ведомость)" desc="Справочник работ для ведомости водителя" />
-        <AdminLink href="/admin/pay" title="Оплата (KPI)" desc="Оклады, премии, веса штрафов, прогрессия" />
+        <AdminLink href="/admin/pay" title="Настройка оплаты (KPI)" desc="Оклады, премии, веса штрафов, прогрессия" />
       </div>
     </main>
   );

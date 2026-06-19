@@ -261,9 +261,9 @@ function AttentionBlock({ attention }: { attention: AttentionDTO }) {
     <section
       id="attention"
       data-testid="attention-block"
-      className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3"
+      className="mb-4 rounded-md border border-slate-900 bg-white p-3"
     >
-      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-800">
+      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">
         <AlertTriangle className="h-4 w-4" /> Требуют внимания
       </h2>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -333,7 +333,7 @@ function BoardSkeleton({ driverCount }: { driverCount: number }) {
   return (
     <div className="flex gap-3 overflow-x-auto pb-4" aria-hidden>
       {Array.from({ length: columns }).map((_, i) => (
-        <div key={i} className="flex w-72 shrink-0 flex-col">
+        <div key={i} className="flex min-w-[18rem] flex-1 flex-col">
           <div className="h-9 rounded-t-md bg-slate-900" />
           <div className="flex min-h-32 flex-1 flex-col gap-2 rounded-b-md border border-t-0 border-slate-200 bg-white p-2">
             <div className="h-16 animate-pulse rounded bg-slate-100" />
@@ -391,7 +391,7 @@ function Column({
       }
     : {};
   return (
-    <div className="flex w-72 shrink-0 flex-col" data-testid={testId}>
+    <div className="flex min-w-[18rem] flex-1 flex-col" data-testid={testId}>
       {/* Графитовая шапка: аватар-инициалы у водителя, иконка-пул у служебных колонок */}
       <div className="flex items-center gap-2 rounded-t-md bg-slate-900 px-2.5 py-2">
         {isDriver ? (
