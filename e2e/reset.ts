@@ -9,16 +9,25 @@
 import { execSync } from "node:child_process";
 
 const CONTAINER = process.env.POSTGRES_CONTAINER ?? "vanmark-postgres";
-const SQL = `UPDATE \\"Task\\" SET status='DONE', \\"completedAt\\"=now() WHERE status='IN_PROGRESS'`;
 
+function psql(sql: string): void {
+  execSync(`docker exec ${CONTAINER} psql -U vanmark -d vanmark -c "${sql}"`, { stdio: "ignore" });
+}
+
+// Подготовка водителей к взятию задач: (1) гасим зависшие IN_PROGRESS (правило «одна активная»);
+// (2) открываем смену на сегодня каждому водителю — иначе взятие в работу даёт SHIFT_REQUIRED
+// (этап D: работать можно только при открытой смене).
 export async function resetActiveTasks(): Promise<void> {
-  execSync(`docker exec ${CONTAINER} psql -U vanmark -d vanmark -c "${SQL}"`, { stdio: "ignore" });
+  psql(`UPDATE \\"Task\\" SET status='DONE', \\"completedAt\\"=now() WHERE status='IN_PROGRESS'`);
+  psql(
+    `INSERT INTO \\"Shift\\" (id,\\"driverId\\",date,status,\\"openedAt\\",\\"createdAt\\") ` +
+      `SELECT gen_random_uuid(),u.id,CURRENT_DATE,'OPEN',now(),now() FROM \\"User\\" u WHERE u.role='DRIVER' ` +
+      `ON CONFLICT (\\"driverId\\",date) DO UPDATE SET status='OPEN'`,
+  );
 }
 
 // Сброс смен (этап C): @@unique(driverId, date) — повторный прогон в тот же день иначе натыкается на
 // смену прошлого теста. Удаляем все смены (в dev-БД они только тестовые).
 export async function resetShifts(): Promise<void> {
-  execSync(`docker exec ${CONTAINER} psql -U vanmark -d vanmark -c "DELETE FROM \\"Shift\\""`, {
-    stdio: "ignore",
-  });
+  psql(`DELETE FROM \\"Shift\\"`);
 }

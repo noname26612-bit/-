@@ -642,10 +642,19 @@ export async function transitionTask(
     throw Errors.paymentRequired();
   }
 
-  // Одна активная задача (этап B): у исполнителя не больше одной задачи «В работе» одновременно.
-  // Правило по assigneeId — работает и когда водитель берёт сам, и когда диспетчер ведёт за исполнителя
-  // (взятие из ASSIGNED или возобновление из ON_HOLD). Для масштаба 3 пользователей гонка исключена де-факто.
+  // Взятие/возобновление работы (→IN_PROGRESS): требуется открытая смена + одна активная задача.
   if (toStatus === "IN_PROGRESS" && task.assigneeId) {
+    // Требование открытой смены — только когда ВОДИТЕЛЬ берёт СВОЮ задачу (решение Артёма 19.06.2026).
+    // Диспетчер ведёт статусы за исполнителя (в т.ч. внешнего перевозчика без смены) — его не блокируем.
+    if (actor.role === "DRIVER" && actor.id === task.assigneeId) {
+      const shift = await prisma.shift.findFirst({
+        where: { driverId: task.assigneeId, status: { in: ["REQUESTED", "OPEN"] } },
+        select: { id: true },
+      });
+      if (!shift) throw Errors.shiftRequired();
+    }
+    // Одна активная задача (этап B): у исполнителя не больше одной задачи «В работе» одновременно.
+    // Правило по assigneeId — работает и когда водитель берёт сам, и когда диспетчер ведёт за исполнителя.
     const other = await prisma.task.findFirst({
       where: { assigneeId: task.assigneeId, status: "IN_PROGRESS", id: { not: taskId } },
       select: { number: true },

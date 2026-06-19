@@ -15,6 +15,23 @@ async function login(page: Page, login: string): Promise<void> {
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
 
+// Диспетчер создаёт задачу и назначает водителю через UI (как в driver.spec).
+async function createAssignedTask(milena: Page, driverLabel: string, typeLabel: string): Promise<string> {
+  const title = `e2e shift ${Date.now()}-${Math.floor(Math.random() * 1e4)}`;
+  await milena.goto("/tasks");
+  await milena.getByRole("button", { name: "Задача" }).click();
+  await milena.locator('[data-testid="create-type"]').selectOption({ label: typeLabel });
+  await milena.getByPlaceholder("ЛБМ 200 + нож, 0,7 мм").fill(title);
+  await milena.getByPlaceholder("Москва, ул. ..., д. ...").fill("Адрес для e2e");
+  await milena.getByRole("button", { name: "Создать", exact: true }).click();
+  await milena.getByRole("link", { name: title }).click();
+  await milena.waitForURL(/\/tasks\/[0-9a-f-]+$/);
+  const id = milena.url().split("/tasks/")[1];
+  await milena.locator('[data-testid="card-assignee"]').selectOption({ label: driverLabel });
+  await expect(milena.getByText("Назначена").first()).toBeVisible();
+  return id;
+}
+
 test("смена: водитель открывает → диспетчер подтверждает → водитель закрывает", async ({ browser }) => {
   const dctx = await browser.newContext();
   const driver = await dctx.newPage();
@@ -102,4 +119,24 @@ test("изоляция смен: водитель не подтверждает 
 
   await dctx.close();
   await guest.close();
+});
+
+// Этап D: без открытой смены задачу в работу взять нельзя (smena чистится в beforeEach).
+test("без открытой смены задачу в работу взять нельзя (SHIFT_REQUIRED)", async ({ browser }) => {
+  test.slow();
+  const mctx = await browser.newContext();
+  const milena = await mctx.newPage();
+  await login(milena, "milena");
+  const id = await createAssignedTask(milena, "Алексей Писарев", "Сдача в ТК");
+
+  const dctx = await browser.newContext();
+  const driver = await dctx.newPage();
+  await login(driver, "pisarev");
+  // Смены у водителя нет (resetShifts) → взятие в работу отклоняется.
+  const r = await driver.request.post(`/api/tasks/${id}/transition`, { data: { toStatus: "IN_PROGRESS" } });
+  expect(r.status()).toBe(409);
+  expect((await r.json()).error.code).toBe("SHIFT_REQUIRED");
+
+  await mctx.close();
+  await dctx.close();
 });

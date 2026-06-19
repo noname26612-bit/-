@@ -31,6 +31,8 @@ export const Errors = {
         : "У водителя уже есть задача в работе",
       409,
     ),
+  shiftRequired: () =>
+    new DomainError("SHIFT_REQUIRED", "Сначала откройте смену", 409),
   uploadInvalid: (message: string) => new DomainError("UPLOAD_INVALID", message, 422),
   validation: (message: string) => new DomainError("VALIDATION", message, 422),
   periodClosed: () =>

@@ -87,6 +87,12 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
     fetcher,
     { refreshInterval: 10_000 },
   );
+  // Открытая смена нужна, чтобы брать задачу в работу (этап D). Знаем статус смены для подсказки.
+  const { data: myShift } = useSWR<{ status: string } | null>(
+    `/api/my/shift?date=${todayISO()}`,
+    fetcher,
+    { refreshInterval: 10_000 },
+  );
 
   const [retrying, setRetrying] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -325,6 +331,9 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
   // Одна активная задача (этап B): если уже есть другая «В работе», кнопку взятия блокируем.
   const activeOther = myToday.find((x) => x.status === "IN_PROGRESS" && x.id !== t.id);
   const blockedByActive = next?.to === "IN_PROGRESS" && !!activeOther;
+  // Открытая смена (этап D): без неё взять задачу в работу нельзя.
+  const shiftOpen = myShift?.status === "REQUESTED" || myShift?.status === "OPEN";
+  const blockedNoShift = next?.to === "IN_PROGRESS" && !shiftOpen;
 
   return (
     <div className="pb-44">
@@ -690,13 +699,15 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
           <>
             <button
               type="button"
-              disabled={busy || blockedByActive}
+              disabled={busy || blockedByActive || blockedNoShift}
               onClick={() => (next.to === "DONE" ? openCompletion() : void changeStatus(next.to))}
               className={`flex h-14 w-full items-center justify-center rounded-xl text-lg font-semibold text-white transition-colors disabled:opacity-60 ${next.cls}`}
             >
               {next.label} →
             </button>
-            {blockedByActive ? (
+            {blockedNoShift ? (
+              <p className="mt-1 text-center text-sm text-amber-700">Сначала откройте смену</p>
+            ) : blockedByActive ? (
               <p className="mt-1 text-center text-sm text-amber-700">
                 Сначала завершите активную задачу №{activeOther?.number}
               </p>
