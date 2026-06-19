@@ -20,12 +20,16 @@ enum Role {
 }
 
 // Статусы задачи (ARCHITECTURE §5). Переходы — только через матрицу в src/domain/task-status.ts.
+// Переработка механики водителя (этап A): рабочая цепочка схлопнута в IN_PROGRESS «В работе»
+// (объединяет прежние ACCEPTED+EN_ROUTE+ON_SITE). ACCEPTED/EN_ROUTE/ON_SITE — LEGACY: новым задачам
+// не назначаются, оставлены в enum ради чтения неизменяемого журнала TaskEvent (CLAUDE.md правило 3).
 enum TaskStatus {
   NEW
   ASSIGNED
-  ACCEPTED
-  EN_ROUTE
-  ON_SITE
+  IN_PROGRESS
+  ACCEPTED // legacy (до этапа A)
+  EN_ROUTE // legacy (до этапа A)
+  ON_SITE // legacy (до этапа A)
   DONE
   ON_HOLD
   RESCHEDULED
@@ -61,6 +65,14 @@ enum WorksheetStatus {
   SIGNED // подписанный акт приложен (этап 14)
 }
 
+// Смена водителя (этап C, переработка механики). Водитель «открывает смену» (фактическое начало дня) →
+// диспетчер подтверждает приход (он физически на базе) → водитель «закрывает смену» (конец дня).
+enum ShiftStatus {
+  REQUESTED // открыта водителем, ждёт подтверждения диспетчера
+  OPEN // диспетчер подтвердил — смена идёт
+  CLOSED // водитель закрыл смену
+}
+
 model User {
   id             String               @id @default(uuid())
   login          String               @unique // латиница, вводится при входе
@@ -85,6 +97,7 @@ model User {
   payProfile      DriverPayProfile?  @relation("payProfile") // денежный профиль (только водители)
   payStatements   PayrollStatement[] @relation("payStatements") // закрытые расчёты за месяцы
   uiPrefs         UiPreference[] // настройки интерфейса (раскладка доски/планирования)
+  shifts          Shift[]            @relation("shiftDriver") // смены водителя (этап C)
 }
 
 // Справочник типов задач (PRD §3). Новые типы заводит админ без правки кода.
@@ -265,6 +278,27 @@ model PushSubscription {
   @@index([userId])
 }
 
+// Смена водителя (этап C). «Открыть смену» фиксирует фактическое начало рабочего дня (момент нажатия
+// водителя), диспетчер подтверждает приход (он на базе). «Закрыть смену» — конец дня. Одна смена на
+// водителя в день. Время начала/конца — основа учёта отработанного и простоя (этап D). Изоляция как у
+// задач: driverId берётся ТОЛЬКО из сессии (CLAUDE.md правило 1). confirmedById — uuid без навигации.
+model Shift {
+  id            String      @id @default(uuid())
+  driverId      String
+  driver        User        @relation("shiftDriver", fields: [driverId], references: [id])
+  date          DateTime    @db.Date // рабочий день — локальная дата открытия (МСК)
+  status        ShiftStatus @default(REQUESTED)
+  openedAt      DateTime // фактическое время начала смены (момент нажатия водителя)
+  confirmedById String? // диспетчер, подтвердивший открытие
+  confirmedAt   DateTime?
+  closedAt      DateTime?
+  createdAt     DateTime    @default(now())
+  kpiMarks      KpiMark[] // отметки KPI по смене (SHIFT_LATE, этап D)
+
+  @@unique([driverId, date]) // одна смена на водителя в день
+  @@index([date, status])
+}
+
 // ───────────────────────────── KPI и зарплата (Фаза 1.5) ─────────────────────────────
 // Модель данных — ARCHITECTURE §4а, продукт — PRD §12. Всё аддитивно поверх Фазы 1.
 // Принцип: зарплата = оклад + (премия − прогрессивные штрафы) + ручные поощрения; закрытый
@@ -272,7 +306,8 @@ model PushSubscription {
 
 // Виды отметок KPI: 3 авто-метрики (детектор) + ручная отметка диспетчера.
 enum KpiMarkKind {
-  LATE // опоздание: «На месте» позже timeTo задачи (PRD §12.1)
+  SHIFT_LATE // поздно открыл смену (этап D): openedAt позже порога 9:15. Заменяет LATE
+  LATE // legacy: опоздание на объект (до этапа D); новых не создаётся, остаётся в истории
   UNSIGNED_DOCS // ремонтная задача завершена без подписанного акта (документ-вложения)
   MISSED_STOP // назначенная на день точка не доведена до DONE (без переноса/отмены)
   MANUAL // ручная отметка: штраф или поощрение (знаковая сумма в manualAmount)
@@ -300,8 +335,10 @@ model KpiMark {
   id           String        @id @default(uuid())
   driverId     String // чей KPI; изоляция водителя — по нему
   driver       User          @relation("kpiDriver", fields: [driverId], references: [id])
-  taskId       String? // привязка к задаче (LATE/UNSIGNED_DOCS/MISSED_STOP); null — ручная общая
+  taskId       String? // привязка к задаче (UNSIGNED_DOCS/MISSED_STOP); null — смена/ручная
   task         Task?         @relation(fields: [taskId], references: [id])
+  shiftId      String? // привязка к смене (SHIFT_LATE, этап D); null — задачная/ручная
+  shift        Shift?        @relation(fields: [shiftId], references: [id])
   period       String // месяц начисления «YYYY-MM» (по occurredAt в CRON_TZ)
   kind         KpiMarkKind
   status       KpiMarkStatus @default(CANDIDATE)
@@ -315,6 +352,7 @@ model KpiMark {
   createdAt    DateTime      @default(now())
 
   @@unique([taskId, kind]) // идемпотентность детектора: одна авто-отметка вида на задачу
+  @@unique([shiftId, kind]) // идемпотентность детектора смен: одна SHIFT_LATE на смену (этап D)
   @@index([driverId, period])
   @@index([status, period])
 }
@@ -397,6 +435,10 @@ model CapacitySettings {
   avgSpeedKmh     Int      @default(50) // средняя скорость свободной дороги, км/ч; калибруется по факту
   detourPercent   Int      @default(110) // коэфф. петляния (110 = ×1.1)
   countReturnTrip Boolean  @default(false) // учитывать обратную дорогу (база→точка→база)
+  // Смена (этап D): порог «поздно открыл смену». shiftStartMinutes — начало рабочего дня (минуты от
+  // полуночи: 540 = 9:00); shiftLateGraceMinutes — запас (15 мин → опоздание после 9:15).
+  shiftStartMinutes     Int @default(540)
+  shiftLateGraceMinutes Int @default(15)
   updatedAt       DateTime @updatedAt
 }
 

@@ -1,4 +1,8 @@
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
+import { resetActiveTasks } from "./reset";
+
+// Чистый старт для правила «одна активная задача» (этап B): гасим зависшие IN_PROGRESS перед каждым тестом.
+test.beforeEach(resetActiveTasks);
 
 // Хвост этапа 14: признак комплектности акта на доске «Сегодня». Показывается ТОЛЬКО на завершённой
 // актовой задаче — янтарь «Акт не приложен» / зелёный «Акт приложен». Ассерт привязан к уникальному
@@ -37,7 +41,7 @@ async function createAssignedTask(milena: Page, title: string): Promise<string> 
 }
 
 async function advanceToDone(req: APIRequestContext, taskId: string): Promise<void> {
-  for (const toStatus of ["ACCEPTED", "EN_ROUTE", "ON_SITE", "DONE"]) {
+  for (const toStatus of ["IN_PROGRESS", "DONE"]) {
     const r = await req.post(`/api/tasks/${taskId}/transition`, { data: { toStatus } });
     expect(r.status(), `переход в ${toStatus}`).toBe(200);
   }

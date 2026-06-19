@@ -9,6 +9,7 @@ import {
   RefreshCw,
   CalendarOff,
   CalendarClock,
+  Clock,
   GripVertical,
   ChevronLeft,
   ChevronRight,
@@ -92,6 +93,12 @@ export function BoardClient({
     fetcher,
     LIVE,
   );
+  // Смены за день (этап C): запросы на открытие, которые диспетчер подтверждает.
+  const { data: shifts, mutate: mutateShifts } = useSWR<ShiftDTO[]>(
+    `/api/shifts?date=${today}`,
+    fetcher,
+    LIVE,
+  );
   const [createOpen, setCreateOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -139,13 +146,14 @@ export function BoardClient({
   });
 
   const total = todays.length;
-  const inWork = todays.filter((t) => ["ACCEPTED", "EN_ROUTE", "ON_SITE"].includes(t.status)).length;
+  const inWork = todays.filter((t) => t.status === "IN_PROGRESS").length;
   const done = todays.filter((t) => t.status === "DONE").length;
   const unassignedTodayCount = todays.filter((t) => !t.assigneeId).length;
   const attentionCount = (attention?.overdue.length ?? 0) + (attention?.tomorrowPasses.length ?? 0);
+  const requestedShifts = (shifts ?? []).filter((s) => s.status === "REQUESTED");
 
-  // Обновить разом обе ленты (после перетаскивания/назначения «внимание» тоже могло измениться).
-  const refresh = () => Promise.all([mutate(), mutateAttention()]);
+  // Обновить разом ленты (после перетаскивания/назначения/подтверждения смены данные могли измениться).
+  const refresh = () => Promise.all([mutate(), mutateAttention(), mutateShifts()]);
 
   async function onDrop(taskId: string, target: DropTarget) {
     const task = list.find((t) => t.id === taskId);
@@ -261,6 +269,10 @@ export function BoardClient({
         <ErrorState onRetry={() => void refresh()} />
       ) : (
         <>
+          {requestedShifts.length > 0 ? (
+            <ShiftsBlock shifts={requestedShifts} onChange={refresh} />
+          ) : null}
+
           {attentionCount > 0 && attention ? <AttentionBlock attention={attention} /> : null}
 
           {/* Пулы в персональном порядке. Шапку можно перетащить, чтобы поменять пулы местами;
@@ -346,6 +358,68 @@ function Stat({
     <div className={className} data-testid={testId}>
       {content}
     </div>
+  );
+}
+
+type ShiftDTO = {
+  id: string;
+  driverId: string;
+  driverName: string | null;
+  status: "REQUESTED" | "OPEN" | "CLOSED";
+  openedAt: string;
+};
+
+// «чч:мм» из ISO в местной зоне (время открытия смены).
+function shiftHHMM(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// Блок «Открытие смен» (этап C): запросы водителей на открытие смены, которые диспетчер подтверждает
+// (он на базе и видит приход). Янтарный — требует действия сейчас (ui-guidelines).
+function ShiftsBlock({
+  shifts,
+  onChange,
+}: {
+  shifts: ShiftDTO[];
+  onChange: () => Promise<unknown>;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  async function confirm(id: string) {
+    setBusy(id);
+    try {
+      await apiSend(`/api/shifts/${id}/confirm`, "POST", {});
+      await onChange();
+    } finally {
+      setBusy(null);
+    }
+  }
+  return (
+    <section
+      data-testid="shifts-block"
+      className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3"
+    >
+      <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-amber-800">
+        <Clock className="h-4 w-4" /> Открытие смен — подтвердите приход
+      </h2>
+      <ul className="flex flex-col gap-2">
+        {shifts.map((s) => (
+          <li
+            key={s.id}
+            className="flex items-center justify-between gap-2 rounded-lg bg-white px-3 py-2"
+          >
+            <span className="text-sm text-neutral-800">
+              {s.driverName ?? "Водитель"} · открыл в {shiftHHMM(s.openedAt)}
+            </span>
+            <Button onClick={() => void confirm(s.id)} disabled={busy === s.id}>
+              Подтвердить
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

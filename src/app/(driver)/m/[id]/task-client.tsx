@@ -20,19 +20,21 @@ import {
   formatDateTime,
   formatMoney,
   navUrl,
+  todayISO,
 } from "@/lib/task-ui";
 import { TypeIcon } from "@/components/type-icon";
 import { Badge } from "@/components/ui/badge";
 
 // Подсказка для UI: следующий статус по водительской цепочке. Сервер всё равно проверяет матрицу.
+// Переработка (этап A): цепочка схлопнута — «В работу» (взять) → «Завершить». Из паузы — «Вернуть в работу».
 const NEXT: Partial<Record<TaskStatus, { to: TaskStatus; label: string; cls: string }>> = {
-  ASSIGNED: { to: "ACCEPTED", label: "Принял", cls: "bg-indigo-600 active:bg-indigo-700" },
-  ACCEPTED: { to: "EN_ROUTE", label: "Выехал", cls: "bg-blue-600 active:bg-blue-700" },
-  EN_ROUTE: { to: "ON_SITE", label: "На месте", cls: "bg-orange-500 active:bg-orange-600" },
-  ON_SITE: { to: "DONE", label: "Выполнено", cls: "bg-green-600 active:bg-green-700" },
+  ASSIGNED: { to: "IN_PROGRESS", label: "В работу", cls: "bg-indigo-600 active:bg-indigo-700" },
+  IN_PROGRESS: { to: "DONE", label: "Завершить", cls: "bg-green-600 active:bg-green-700" },
+  ON_HOLD: { to: "IN_PROGRESS", label: "Вернуть в работу", cls: "bg-indigo-600 active:bg-indigo-700" },
 };
 
-const CAN_HOLD: TaskStatus[] = ["ACCEPTED", "EN_ROUTE", "ON_SITE"];
+// Пауза «На паузе» — только из активной работы (с обязательной причиной).
+const CAN_HOLD: TaskStatus[] = ["IN_PROGRESS"];
 
 const KIND_LABEL: Record<string, string> = {
   created: "Создана",
@@ -77,6 +79,19 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
   const { data: workCatalog = [] } = useSWR<WorkCatalogItemDTO[]>(
     task?.type.requiresPricing ? "/api/work-catalog" : null,
     fetcher,
+  );
+  // Одна активная задача (этап B): знаем про другую задачу водителя «В работе», чтобы заранее
+  // заблокировать кнопку «В работу» (сервер всё равно запретит — это проактивная подсказка в UI).
+  const { data: myToday = [] } = useSWR<{ id: string; status: TaskStatus; number: number }[]>(
+    `/api/my/tasks?date=${todayISO()}&scope=today`,
+    fetcher,
+    { refreshInterval: 10_000 },
+  );
+  // Открытая смена нужна, чтобы брать задачу в работу (этап D). Знаем статус смены для подсказки.
+  const { data: myShift } = useSWR<{ status: string } | null>(
+    `/api/my/shift?date=${todayISO()}`,
+    fetcher,
+    { refreshInterval: 10_000 },
   );
 
   const [retrying, setRetrying] = useState(false);
@@ -313,6 +328,12 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
 
   const next = NEXT[t.status];
   const canHold = CAN_HOLD.includes(t.status);
+  // Одна активная задача (этап B): если уже есть другая «В работе», кнопку взятия блокируем.
+  const activeOther = myToday.find((x) => x.status === "IN_PROGRESS" && x.id !== t.id);
+  const blockedByActive = next?.to === "IN_PROGRESS" && !!activeOther;
+  // Открытая смена (этап D): без неё взять задачу в работу нельзя.
+  const shiftOpen = myShift?.status === "REQUESTED" || myShift?.status === "OPEN";
+  const blockedNoShift = next?.to === "IN_PROGRESS" && !shiftOpen;
 
   return (
     <div className="pb-44">
@@ -675,16 +696,23 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
         {actionError ? <p className="mb-2 text-center text-sm text-red-600">{actionError}</p> : null}
 
         {next ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => (t.status === "ON_SITE" ? openCompletion() : void changeStatus(next.to))}
-            className={`flex h-14 w-full items-center justify-center rounded-xl text-lg font-semibold text-white transition-colors disabled:opacity-60 ${next.cls}`}
-          >
-            {next.label} →
-          </button>
-        ) : t.status === "ON_HOLD" ? (
-          <p className="py-2 text-center text-base text-neutral-500">На паузе — снимет диспетчер</p>
+          <>
+            <button
+              type="button"
+              disabled={busy || blockedByActive || blockedNoShift}
+              onClick={() => (next.to === "DONE" ? openCompletion() : void changeStatus(next.to))}
+              className={`flex h-14 w-full items-center justify-center rounded-xl text-lg font-semibold text-white transition-colors disabled:opacity-60 ${next.cls}`}
+            >
+              {next.label} →
+            </button>
+            {blockedNoShift ? (
+              <p className="mt-1 text-center text-sm text-amber-700">Сначала откройте смену</p>
+            ) : blockedByActive ? (
+              <p className="mt-1 text-center text-sm text-amber-700">
+                Сначала завершите активную задачу №{activeOther?.number}
+              </p>
+            ) : null}
+          </>
         ) : t.status === "DONE" ? (
           <p className="py-2 text-center text-base font-medium text-green-700">Задача выполнена ✓</p>
         ) : t.status === "CANCELLED" ? (
@@ -698,7 +726,7 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
             onClick={() => setHoldOpen(true)}
             className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-lg text-base font-medium text-amber-700 disabled:opacity-60"
           >
-            Поставить на паузу («Ждёт»)
+            Поставить на паузу
           </button>
         ) : null}
       </div>

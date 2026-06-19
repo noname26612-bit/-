@@ -3,7 +3,7 @@
 // (гейт в route handler). Период — ПО ДАТЕ ЗАКРЫТИЯ задачи; отмены/переносы — по журналу событий.
 // Чистая арифметика окна периода — в src/domain/summary.ts.
 import { prisma } from "@/lib/prisma";
-import { dateKeyInTz, KPI_TZ } from "./kpi";
+import { dateKeyInTz, utcDateKey, KPI_TZ } from "./kpi";
 import {
   assertGranularity,
   normalizeAnchor,
@@ -26,11 +26,12 @@ type Acc = {
   missed: number;
   cancelled: number;
   rescheduled: number;
-  durations: number[]; // длительности «На месте → Выполнено» в мс
+  durations: number[]; // длительности «В работе → Завершено» в мс (этап A: старт работы — IN_PROGRESS)
+  shiftMs: number; // суммарная длина закрытых смен периода, мс (этап D) — для простоя
 };
 
 function emptyAcc(): Acc {
-  return { done: 0, repair: 0, delivery: 0, byType: new Map(), late: 0, missed: 0, cancelled: 0, rescheduled: 0, durations: [] };
+  return { done: 0, repair: 0, delivery: 0, byType: new Map(), late: 0, missed: 0, cancelled: 0, rescheduled: 0, durations: [], shiftMs: 0 };
 }
 
 /**
@@ -45,7 +46,7 @@ export async function getDriverSummary(granularity: string, anchorRaw: string): 
   const w = windowKeys(granularity, anchor);
   const range = coarseUtcRange(w);
 
-  const [drivers, doneTasks, marks, statusEvents] = await Promise.all([
+  const [drivers, doneTasks, marks, statusEvents, shifts] = await Promise.all([
     prisma.user.findMany({
       where: { role: "DRIVER", isActive: true },
       select: { id: true, name: true },
@@ -57,16 +58,21 @@ export async function getDriverSummary(granularity: string, anchorRaw: string): 
         assigneeId: true,
         completedAt: true,
         type: { select: { id: true, name: true, requiresSignedDoc: true } },
-        events: { where: { toStatus: "ON_SITE" }, orderBy: { at: "asc" }, take: 1, select: { at: true } },
+        events: { where: { toStatus: "IN_PROGRESS" }, orderBy: { at: "asc" }, take: 1, select: { at: true } },
       },
     }),
     prisma.kpiMark.findMany({
-      where: { kind: { in: ["LATE", "MISSED_STOP"] }, status: "CONFIRMED", occurredAt: { gte: range.gte, lt: range.lt } },
+      where: { kind: { in: ["SHIFT_LATE", "MISSED_STOP"] }, status: "CONFIRMED", occurredAt: { gte: range.gte, lt: range.lt } },
       select: { driverId: true, kind: true, occurredAt: true },
     }),
     prisma.taskEvent.findMany({
       where: { toStatus: { in: ["CANCELLED", "RESCHEDULED"] }, at: { gte: range.gte, lt: range.lt } },
       select: { at: true, toStatus: true, task: { select: { assigneeId: true } } },
+    }),
+    // Закрытые смены периода (этап D) — для простоя. Грубый range по дню смены, точное окно ниже.
+    prisma.shift.findMany({
+      where: { status: "CLOSED", closedAt: { not: null }, date: { gte: range.gte, lt: range.lt } },
+      select: { driverId: true, date: true, openedAt: true, closedAt: true },
     }),
   ]);
 
@@ -85,9 +91,9 @@ export async function getDriverSummary(granularity: string, anchorRaw: string): 
     const bt = a.byType.get(t.type.id);
     if (bt) bt.count += 1;
     else a.byType.set(t.type.id, { typeId: t.type.id, typeName: t.type.name, isRepair: t.type.requiresSignedDoc, count: 1 });
-    const onSiteAt = t.events[0]?.at;
-    if (onSiteAt) {
-      const ms = t.completedAt.getTime() - onSiteAt.getTime();
+    const startedAt = t.events[0]?.at; // первый переход в «В работе» (этап A; раньше — «На месте»)
+    if (startedAt) {
+      const ms = t.completedAt.getTime() - startedAt.getTime();
       if (ms > 0) a.durations.push(ms); // отрицательные/нулевые (кривые данные) не учитываем
     }
   }
@@ -97,8 +103,18 @@ export async function getDriverSummary(granularity: string, anchorRaw: string): 
     const a = acc.get(m.driverId);
     if (!a) continue;
     if (!inWindow(dateKeyInTz(m.occurredAt, KPI_TZ), w)) continue;
-    if (m.kind === "LATE") a.late += 1;
+    if (m.kind === "SHIFT_LATE") a.late += 1;
     else if (m.kind === "MISSED_STOP") a.missed += 1;
+  }
+
+  // Длина закрытых смен в окне (этап D) — знаменатель для простоя.
+  for (const s of shifts) {
+    if (!s.closedAt) continue;
+    const a = acc.get(s.driverId);
+    if (!a) continue;
+    if (!inWindow(utcDateKey(s.date), w)) continue;
+    const ms = s.closedAt.getTime() - s.openedAt.getTime();
+    if (ms > 0) a.shiftMs += ms;
   }
 
   // Отмены/переносы — по журналу (write-only, надёжнее updatedAt). Привязка к текущему исполнителю задачи.
@@ -115,6 +131,9 @@ export async function getDriverSummary(granularity: string, anchorRaw: string): 
   const driverViews: DriverSummaryView[] = drivers.map((d) => {
     const a = acc.get(d.id)!;
     const byType = [...a.byType.values()].sort((x, y) => y.count - x.count || x.typeName.localeCompare(y.typeName, "ru"));
+    // Отработано = сумма времени по задачам (В работе → Завершено); простой = смены − отработано (этап D).
+    const workedMinutes = Math.round(a.durations.reduce((s, x) => s + x, 0) / 60000);
+    const idleMinutes = Math.max(0, Math.round(a.shiftMs / 60000) - workedMinutes);
     return {
       driverId: d.id,
       driverName: d.name,
@@ -127,6 +146,8 @@ export async function getDriverSummary(granularity: string, anchorRaw: string): 
       cancelledCount: a.cancelled,
       rescheduledCount: a.rescheduled,
       avgOnSiteMinutes: averageMinutes(a.durations),
+      workedMinutes,
+      idleMinutes,
     };
   });
 
@@ -139,6 +160,8 @@ export async function getDriverSummary(granularity: string, anchorRaw: string): 
     cancelledCount: sum(driverViews, (d) => d.cancelledCount),
     rescheduledCount: sum(driverViews, (d) => d.rescheduledCount),
     avgOnSiteMinutes: averageMinutes([...acc.values()].flatMap((a) => a.durations)),
+    workedMinutes: sum(driverViews, (d) => d.workedMinutes),
+    idleMinutes: sum(driverViews, (d) => d.idleMinutes),
   };
 
   return { granularity: granularity as Granularity, anchor, fromKey: w.fromKey, toKey: w.toKey, drivers: driverViews, totals };

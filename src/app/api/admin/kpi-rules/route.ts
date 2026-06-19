@@ -8,7 +8,7 @@ import type { KpiMarkKind } from "@/generated/prisma/enums";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const RULE_KINDS: KpiMarkKind[] = ["LATE", "MISSED_STOP", "UNSIGNED_DOCS"];
+const RULE_KINDS: KpiMarkKind[] = ["SHIFT_LATE", "MISSED_STOP", "UNSIGNED_DOCS"];
 
 // GET /api/admin/kpi-rules — веса штрафов. PUT {kind, weight} — обновить вес. Только админ.
 export async function GET() {

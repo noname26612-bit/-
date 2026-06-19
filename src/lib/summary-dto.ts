@@ -25,7 +25,9 @@ export type DriverSummaryView = {
   missedStopCount: number; // подтверждённые невыполненные точки (KPI)
   cancelledCount: number; // отмен в окне (по журналу)
   rescheduledCount: number; // переносов в окне (по журналу)
-  avgOnSiteMinutes: number | null; // среднее «Выполнено − На месте», мин; null — нет данных
+  avgOnSiteMinutes: number | null; // среднее «Завершено − В работе», мин; null — нет данных
+  workedMinutes: number; // отработано на задачах (сумма «В работе → Завершено»), мин (этап D)
+  idleMinutes: number; // простой = смены − отработано, мин (этап D)
 };
 
 /** Итоги по всем водителям. */
@@ -38,6 +40,8 @@ export type SummaryTotals = {
   cancelledCount: number;
   rescheduledCount: number;
   avgOnSiteMinutes: number | null;
+  workedMinutes: number;
+  idleMinutes: number;
 };
 
 export type SummaryOverview = {

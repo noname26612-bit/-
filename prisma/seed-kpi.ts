@@ -20,7 +20,7 @@ export const REPAIR_TYPE_NAMES = [
 // Дефолты-заглушки (числа Артёма 17.06.2026). Далее настраиваются админом в UI — поэтому upsert
 // только СОЗДАЁТ строки, не перетирая уже настроенные значения.
 export const KPI_RULES: { kind: KpiMarkKind; weight: number }[] = [
-  { kind: "LATE", weight: 500 },
+  { kind: "SHIFT_LATE", weight: 500 }, // этап D: «поздно открыл смену» (заменяет LATE «опоздание на объект»)
   { kind: "MISSED_STOP", weight: 500 },
   { kind: "UNSIGNED_DOCS", weight: 1000 },
 ];

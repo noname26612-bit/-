@@ -9,7 +9,7 @@ import {
   computePay,
   computeActBonus,
   periodBoundsUtc,
-  detectLate,
+  detectShiftLate,
   detectUnsignedDoc,
   detectMissedStop,
   dateKeyInTz,
@@ -113,7 +113,7 @@ async function loadKpiConfig(): Promise<KpiConfig> {
   return {
     calc: {
       weights: {
-        LATE: weight("LATE", 500),
+        SHIFT_LATE: weight("SHIFT_LATE", 500),
         UNSIGNED_DOCS: weight("UNSIGNED_DOCS", 1000),
         MISSED_STOP: weight("MISSED_STOP", 500),
       },
@@ -263,28 +263,43 @@ export async function detectCandidatesForDate(
   // Отметки заводим только по водителям, участвующим в KPI (с денежным профилем). Задачи Николая
   // и внешнего перевозчика детектор пропускает — они вне расчёта (PRD §12, §2).
   const tracked = await trackedDriverIds();
-  const tasks = await prisma.task.findMany({
-    where: {
-      assigneeId: { in: tracked },
-      OR: [{ scheduledDate: scheduledDay }, { completedAt: { gte: scheduledDay, lt: dayEnd } }],
-    },
-    select: {
-      id: true,
-      assigneeId: true,
-      scheduledDate: true,
-      timeTo: true,
-      status: true,
-      completedAt: true,
-      requiresSignedDoc: true, // требование акта на уровне задачи (этап 11), не из типа
-      events: { where: { toStatus: "ON_SITE" }, orderBy: { at: "asc" }, take: 1, select: { at: true } },
-      attachments: { where: { kind: "DOCUMENT" }, take: 1, select: { id: true } },
-    },
-  });
+  const [tasks, shifts, settings] = await Promise.all([
+    prisma.task.findMany({
+      where: {
+        assigneeId: { in: tracked },
+        OR: [{ scheduledDate: scheduledDay }, { completedAt: { gte: scheduledDay, lt: dayEnd } }],
+      },
+      select: {
+        id: true,
+        assigneeId: true,
+        scheduledDate: true,
+        status: true,
+        completedAt: true,
+        requiresSignedDoc: true, // требование акта на уровне задачи (этап 11), не из типа
+        attachments: { where: { kind: "DOCUMENT" }, take: 1, select: { id: true } },
+      },
+    }),
+    // Смены за день (этап D) — для метрики «поздно открыл смену». Только подтверждённые/закрытые.
+    prisma.shift.findMany({
+      where: { date: scheduledDay, driverId: { in: tracked }, status: { in: ["OPEN", "CLOSED"] } },
+      select: { id: true, driverId: true, openedAt: true, status: true },
+    }),
+    prisma.capacitySettings.findUnique({ where: { id: "singleton" } }),
+  ]);
+  const startMinutes = settings?.shiftStartMinutes ?? 540;
+  const graceMinutes = settings?.shiftLateGraceMinutes ?? 15;
 
-  const byKind: Record<KpiMarkKind, number> = { LATE: 0, UNSIGNED_DOCS: 0, MISSED_STOP: 0, MANUAL: 0 };
+  const byKind: Record<KpiMarkKind, number> = {
+    SHIFT_LATE: 0,
+    LATE: 0,
+    UNSIGNED_DOCS: 0,
+    MISSED_STOP: 0,
+    MANUAL: 0,
+  };
   const data: {
     driverId: string;
-    taskId: string;
+    taskId: string | null;
+    shiftId: string | null;
     period: string;
     kind: KpiMarkKind;
     status: KpiMarkStatus;
@@ -293,35 +308,51 @@ export async function detectCandidatesForDate(
     createdById: null;
   }[] = [];
 
+  const push = (c: ReturnType<typeof detectUnsignedDoc>) => {
+    if (!c) return;
+    byKind[c.kind] += 1;
+    data.push({
+      driverId: c.driverId,
+      taskId: c.taskId,
+      shiftId: c.shiftId,
+      period: c.period,
+      kind: c.kind,
+      status: "CANDIDATE",
+      occurredAt: c.occurredAt,
+      note: c.note,
+      createdById: null,
+    });
+  };
+
+  // Задачные метрики: без акта + невыполненная точка (опоздание на объект больше не детектируется — этап D).
   for (const t of tasks) {
-    const onSiteAt = t.events[0]?.at ?? null;
-    const hasSignedDoc = t.attachments.length > 0;
-    const found = [
-      detectLate({ driverId: t.assigneeId, taskId: t.id, scheduledDate: t.scheduledDate, timeTo: t.timeTo, onSiteAt }),
+    push(
       detectUnsignedDoc({
         driverId: t.assigneeId,
         taskId: t.id,
         requiresSignedDoc: t.requiresSignedDoc,
         status: t.status,
         completedAt: t.completedAt,
-        hasSignedDoc,
+        hasSignedDoc: t.attachments.length > 0,
       }),
-      detectMissedStop({ driverId: t.assigneeId, taskId: t.id, scheduledDate: t.scheduledDate, status: t.status }, asOf),
-    ];
-    for (const c of found) {
-      if (!c) continue;
-      byKind[c.kind] += 1;
-      data.push({
-        driverId: c.driverId,
-        taskId: c.taskId,
-        period: c.period,
-        kind: c.kind,
-        status: "CANDIDATE",
-        occurredAt: c.occurredAt,
-        note: c.note,
-        createdById: null,
-      });
-    }
+    );
+    push(
+      detectMissedStop(
+        { driverId: t.assigneeId, taskId: t.id, scheduledDate: t.scheduledDate, status: t.status },
+        asOf,
+      ),
+    );
+  }
+
+  // Метрика смены: поздно открыл смену (позже порога 9:15).
+  for (const s of shifts) {
+    push(
+      detectShiftLate(
+        { driverId: s.driverId, shiftId: s.id, openedAt: s.openedAt, status: s.status },
+        startMinutes,
+        graceMinutes,
+      ),
+    );
   }
 
   const res = data.length ? await prisma.kpiMark.createMany({ data, skipDuplicates: true }) : { count: 0 };
@@ -543,7 +574,7 @@ export async function upsertPayProfile(input: {
 
 export async function listKpiRules(): Promise<KpiRuleView[]> {
   const rules = await prisma.kpiRule.findMany();
-  const order: KpiMarkKind[] = ["LATE", "MISSED_STOP", "UNSIGNED_DOCS"];
+  const order: KpiMarkKind[] = ["SHIFT_LATE", "MISSED_STOP", "UNSIGNED_DOCS"];
   return order.map((kind) => {
     const r = rules.find((x) => x.kind === kind);
     return { kind, weight: r?.weight ?? 0, isActive: r?.isActive ?? true };

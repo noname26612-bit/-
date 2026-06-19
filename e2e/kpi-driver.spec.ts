@@ -1,4 +1,8 @@
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
+import { resetActiveTasks } from "./reset";
+
+// Чистый старт для правила «одна активная задача» (этап B): гасим зависшие IN_PROGRESS перед каждым тестом.
+test.beforeEach(resetActiveTasks);
 
 const PASSWORD = process.env.SEED_PASSWORD ?? "vanmark123";
 
@@ -35,8 +39,8 @@ async function createAssignedTask(milena: Page, driverLabel: string, typeLabel: 
   return id;
 }
 
-async function advanceToOnSite(req: APIRequestContext, taskId: string): Promise<void> {
-  for (const toStatus of ["ACCEPTED", "EN_ROUTE", "ON_SITE"]) {
+async function advanceToInProgress(req: APIRequestContext, taskId: string): Promise<void> {
+  for (const toStatus of ["IN_PROGRESS"]) {
     const r = await req.post(`/api/tasks/${taskId}/transition`, { data: { toStatus } });
     expect(r.status(), `переход в ${toStatus}`).toBe(200);
   }
@@ -54,7 +58,7 @@ test("акт прикладывается на ремонтной задаче �
 
   // Задача A: ремонтный тип (требует и фото, и ожидает акт). Завершаем БЕЗ акта — должно пройти.
   const a = await createAssignedTask(milena, "Алексей Каширский", "Выездной ремонт / диагностика");
-  await advanceToOnSite(driver.request, a);
+  await advanceToInProgress(driver.request, a);
   // фото отчёта (обязательно для типа) — а акт намеренно не прикладываем
   const photo = await driver.request.post(`/api/tasks/${a}/attachments`, {
     multipart: { file: { name: "photo.jpg", mimeType: "image/jpeg", buffer: JPEG } },
@@ -65,7 +69,7 @@ test("акт прикладывается на ремонтной задаче �
 
   // Задача B: прикладываем акт (PDF) — создаётся вложение kind=DOCUMENT, видно в задаче.
   const b = await createAssignedTask(milena, "Алексей Каширский", "Выездной ремонт / диагностика");
-  await advanceToOnSite(driver.request, b);
+  await advanceToInProgress(driver.request, b);
   const akt = await driver.request.post(`/api/tasks/${b}/attachments`, {
     multipart: { file: { name: "akt.pdf", mimeType: "application/pdf", buffer: PDF }, kind: "DOCUMENT" },
   });

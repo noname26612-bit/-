@@ -179,16 +179,26 @@ function DriverCard({ driver }: { driver: DriverSummaryView }) {
       </div>
 
       <div className="mt-3.5 flex flex-wrap gap-x-5 gap-y-2 text-sm">
-        <ProblemChip label="Опоздания" value={driver.lateCount} tone="warn" />
+        <ProblemChip label="Поздние смены" value={driver.lateCount} tone="warn" />
         <ProblemChip label="Невып. точки" value={driver.missedStopCount} tone="danger" />
         <ProblemChip label="Отмены" value={driver.cancelledCount} tone="muted" />
         <ProblemChip label="Переносы" value={driver.rescheduledCount} tone="muted" />
       </div>
 
-      <div className="mt-3 flex items-center justify-between border-t border-neutral-100 pt-2.5 text-sm">
-        <span className="text-neutral-500">Среднее на объекте</span>
-        <span className="font-medium text-neutral-800">{formatOnSite(driver.avgOnSiteMinutes)}</span>
+      <div className="mt-3 grid grid-cols-3 gap-x-4 border-t border-neutral-100 pt-2.5 text-sm">
+        <TimeStat label="На задаче (ср.)" value={formatOnSite(driver.avgOnSiteMinutes)} />
+        <TimeStat label="Отработано" value={formatOnSite(driver.workedMinutes)} />
+        <TimeStat label="Простой" value={formatOnSite(driver.idleMinutes)} />
       </div>
+    </div>
+  );
+}
+
+function TimeStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-xs text-neutral-500">{label}</span>
+      <span className="font-medium text-neutral-800">{value}</span>
     </div>
   );
 }
@@ -243,11 +253,10 @@ function TotalsBar({ totals, label }: { totals: SummaryTotals; label: string }) 
     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-neutral-300 bg-neutral-50 px-4 py-2.5 text-sm">
       <span className="font-medium text-neutral-800">Итого · {label}</span>
       <span className="text-neutral-500">
-        выполнено <b className="font-medium text-neutral-800">{totals.doneCount}</b> · опоздания{" "}
+        выполнено <b className="font-medium text-neutral-800">{totals.doneCount}</b> · поздние смены{" "}
         <b className="font-medium text-neutral-800">{totals.lateCount}</b> · невып. точки{" "}
-        <b className="font-medium text-neutral-800">{totals.missedStopCount}</b> · отмены{" "}
-        <b className="font-medium text-neutral-800">{totals.cancelledCount}</b> · переносы{" "}
-        <b className="font-medium text-neutral-800">{totals.rescheduledCount}</b>
+        <b className="font-medium text-neutral-800">{totals.missedStopCount}</b> · простой{" "}
+        <b className="font-medium text-neutral-800">{formatOnSite(totals.idleMinutes)}</b>
       </span>
     </div>
   );

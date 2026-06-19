@@ -6,7 +6,7 @@ import {
   noonUtc,
   parseHHMM,
   progressionMultiplier,
-  detectLate,
+  detectShiftLate,
   detectUnsignedDoc,
   detectMissedStop,
   computePay,
@@ -62,48 +62,41 @@ describe("kpi — утилиты времени/периода", () => {
   });
 });
 
-// ───────────────────────────── Детектор: опоздание ─────────────────────────────
+// ───────────────────────────── Детектор: поздно открыл смену ─────────────────────────────
 
-describe("kpi — detectLate", () => {
-  const base = {
-    driverId: "d1",
-    taskId: "t1",
-    scheduledDate: new Date("2026-06-03T00:00:00.000Z"),
-    timeTo: "17:00",
-  };
+describe("kpi — detectShiftLate", () => {
+  const START = 540; // 9:00
+  const GRACE = 15; // запас → порог 9:15
+  const base = { driverId: "d1", shiftId: "s1", status: "OPEN" as const };
 
-  it("приезд позже окна в тот же день — нарушение", () => {
-    const c = detectLate({ ...base, onSiteAt: new Date("2026-06-03T15:30:00.000Z") }, TZ); // 18:30 МСК
-    expect(c?.kind).toBe("LATE");
-    expect(c?.occurredAt.toISOString()).toBe("2026-06-03T15:30:00.000Z");
+  it("открыл смену позже порога — нарушение (привязано к смене, без задачи)", () => {
+    // 06:30 UTC = 09:30 МСК (> 9:15)
+    const c = detectShiftLate({ ...base, openedAt: new Date("2026-06-03T06:30:00.000Z") }, START, GRACE, TZ);
+    expect(c?.kind).toBe("SHIFT_LATE");
+    expect(c?.shiftId).toBe("s1");
+    expect(c?.taskId).toBeNull();
     expect(c?.period).toBe("2026-06");
   });
 
-  it("приезд в пределах окна — нет нарушения", () => {
-    expect(detectLate({ ...base, onSiteAt: new Date("2026-06-03T10:00:00.000Z") }, TZ)).toBeNull(); // 13:00 МСК
+  it("открыл в пределах запаса — нет нарушения", () => {
+    // 06:10 UTC = 09:10 МСК (≤ 9:15)
+    expect(detectShiftLate({ ...base, openedAt: new Date("2026-06-03T06:10:00.000Z") }, START, GRACE, TZ)).toBeNull();
   });
 
-  it("приезд на следующий день — нарушение независимо от времени", () => {
-    const c = detectLate({ ...base, onSiteAt: new Date("2026-06-04T05:00:00.000Z") }, TZ); // 08:00 МСК 4-го
-    expect(c?.kind).toBe("LATE");
+  it("ровно на пороге 9:15 — не нарушение", () => {
+    // 06:15 UTC = 09:15 МСК
+    expect(detectShiftLate({ ...base, openedAt: new Date("2026-06-03T06:15:00.000Z") }, START, GRACE, TZ)).toBeNull();
   });
 
-  it("нет окна времени / нечитаемое — пропускаем", () => {
-    expect(detectLate({ ...base, timeTo: null, onSiteAt: new Date("2026-06-03T20:00:00.000Z") }, TZ)).toBeNull();
-    expect(detectLate({ ...base, timeTo: "вечером", onSiteAt: new Date("2026-06-03T20:00:00.000Z") }, TZ)).toBeNull();
-  });
-
-  it("не приехал (нет onSiteAt) или нет водителя — нет нарушения", () => {
-    expect(detectLate({ ...base, onSiteAt: null }, TZ)).toBeNull();
-    expect(detectLate({ ...base, driverId: null, onSiteAt: new Date("2026-06-03T20:00:00.000Z") }, TZ)).toBeNull();
-  });
-
-  it("без даты задачи опирается на день фактического приезда", () => {
-    const c = detectLate(
-      { driverId: "d1", taskId: "t1", scheduledDate: null, timeTo: "17:00", onSiteAt: new Date("2026-06-03T16:00:00.000Z") }, // 19:00 МСК
-      TZ,
-    );
-    expect(c?.kind).toBe("LATE");
+  it("неподтверждённая смена (REQUESTED) — не штрафуем (приход не подтверждён)", () => {
+    expect(
+      detectShiftLate(
+        { ...base, status: "REQUESTED", openedAt: new Date("2026-06-03T07:00:00.000Z") },
+        START,
+        GRACE,
+        TZ,
+      ),
+    ).toBeNull();
   });
 });
 
@@ -134,7 +127,7 @@ describe("kpi — detectUnsignedDoc", () => {
   });
 
   it("ещё не завершена — нет нарушения", () => {
-    expect(detectUnsignedDoc({ ...base, status: "ON_SITE", hasSignedDoc: false }, TZ)).toBeNull();
+    expect(detectUnsignedDoc({ ...base, status: "IN_PROGRESS", hasSignedDoc: false }, TZ)).toBeNull();
   });
 });
 
@@ -178,7 +171,7 @@ const mark = (kind: CalcMark["kind"], iso: string, manualAmount?: number): CalcM
 
 // Параметры из примера PRD §12.3 (исторические).
 const PRD_CONFIG: CalcConfig = {
-  weights: { LATE: 1000, UNSIGNED_DOCS: 3000, MISSED_STOP: 2000 },
+  weights: { SHIFT_LATE: 1000, UNSIGNED_DOCS: 3000, MISSED_STOP: 2000 },
   progressionPercent: 125,
   progressionStartIndex: 2,
   floor: "ZERO",
@@ -186,7 +179,7 @@ const PRD_CONFIG: CalcConfig = {
 
 // Параметры, зафиксированные Артёмом 17.06.2026.
 const ARTEM_CONFIG: CalcConfig = {
-  weights: { LATE: 500, UNSIGNED_DOCS: 1000, MISSED_STOP: 500 },
+  weights: { SHIFT_LATE: 500, UNSIGNED_DOCS: 1000, MISSED_STOP: 500 },
   progressionPercent: 110,
   progressionStartIndex: 3,
   floor: "SALARY",
@@ -203,7 +196,7 @@ describe("kpi — computePay: пример PRD §12.3", () => {
     const r = computePay({
       baseSalary: 50_000,
       premiumBase: 10_000,
-      marks: [mark("LATE", "2026-06-05T09:00:00Z"), mark("LATE", "2026-06-12T09:00:00Z")],
+      marks: [mark("SHIFT_LATE", "2026-06-05T09:00:00Z"), mark("SHIFT_LATE", "2026-06-12T09:00:00Z")],
       config: PRD_CONFIG,
     });
     expect(r.penalty).toBe(2_250); // 1000 + 1250
@@ -222,10 +215,10 @@ describe("kpi — computePay: параметры Артёма (floor=SALARY)", (
       baseSalary: 70_000,
       premiumBase: 40_000,
       marks: [
-        mark("LATE", "2026-06-02T09:00:00Z"),
-        mark("LATE", "2026-06-05T09:00:00Z"),
-        mark("LATE", "2026-06-09T09:00:00Z"),
-        mark("LATE", "2026-06-12T09:00:00Z"),
+        mark("SHIFT_LATE", "2026-06-02T09:00:00Z"),
+        mark("SHIFT_LATE", "2026-06-05T09:00:00Z"),
+        mark("SHIFT_LATE", "2026-06-09T09:00:00Z"),
+        mark("SHIFT_LATE", "2026-06-12T09:00:00Z"),
       ],
       config: ARTEM_CONFIG,
     });
@@ -271,7 +264,7 @@ describe("kpi — computePay: параметры Артёма (floor=SALARY)", (
 describe("kpi — computePay: порядок и breakdown", () => {
   it("штрафы нумеруются по времени возникновения, не по порядку в массиве", () => {
     const cfg: CalcConfig = {
-      weights: { LATE: 1000, UNSIGNED_DOCS: 1000, MISSED_STOP: 1000 },
+      weights: { SHIFT_LATE: 1000, UNSIGNED_DOCS: 1000, MISSED_STOP: 1000 },
       progressionPercent: 200, // ×2 для наглядности
       progressionStartIndex: 2,
       floor: "ZERO",
@@ -280,7 +273,7 @@ describe("kpi — computePay: порядок и breakdown", () => {
       baseSalary: 0,
       premiumBase: 100_000,
       marks: [
-        mark("LATE", "2026-06-20T09:00:00Z"), // позже
+        mark("SHIFT_LATE", "2026-06-20T09:00:00Z"), // позже
         mark("MISSED_STOP", "2026-06-05T09:00:00Z"), // раньше
         mark("UNSIGNED_DOCS", "2026-06-12T09:00:00Z"), // в середине
       ],
@@ -299,7 +292,7 @@ describe("kpi — computePay: порядок и breakdown", () => {
       baseSalary: 70_000,
       premiumBase: 40_000,
       marks: [
-        mark("LATE", "2026-06-03T09:00:00Z"),
+        mark("SHIFT_LATE", "2026-06-03T09:00:00Z"),
         mark("MANUAL", "2026-06-10T09:00:00Z", 5_000),
         mark("MANUAL", "2026-06-15T09:00:00Z", -2_000),
       ],
@@ -309,7 +302,7 @@ describe("kpi — computePay: порядок и breakdown", () => {
     expect(r.bonus).toBe(5_000);
     expect(r.total).toBe(70_000 + (40_000 - 2_500) + 5_000);
     expect(r.breakdown).toHaveLength(3);
-    const late = r.breakdown.find((b) => b.kind === "LATE");
+    const late = r.breakdown.find((b) => b.kind === "SHIFT_LATE");
     expect(late?.amount).toBe(-500);
   });
 });
