@@ -64,6 +64,8 @@ test("планирование: пул «Без даты» → ячейка во
 
   const kashCell = page.getByTestId(`cell-${kashId}-${tomorrow}`);
   await expect(kashCell.locator('[data-testid="plan-card"]').filter({ hasText: title })).toBeVisible();
+  // Индикатор загрузки появляется в ячейке водителя (Фаза 2, §14.4).
+  await expect(kashCell.getByTestId("cell-load")).toBeVisible();
   // Ушла из «Без даты».
   await expect(
     page.getByTestId("plan-undated").locator('[data-testid="plan-card"]').filter({ hasText: title }),
