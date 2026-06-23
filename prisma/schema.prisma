@@ -291,7 +291,13 @@ model Shift {
   driver        User        @relation("shiftDriver", fields: [driverId], references: [id])
   date          DateTime    @db.Date // рабочий день — локальная дата открытия (МСК)
   status        ShiftStatus @default(REQUESTED)
-  openedAt      DateTime // фактическое время начала смены (момент нажатия водителя)
+  openedAt      DateTime // фактическое время начала смены; может быть скорректировано диспетчером/админом (№3)
+  // Корректировка времени открытия (№3, решение Артёма 23.06): на случай «не было связи / сел телефон».
+  // В openedAt держим АКТУАЛЬНОЕ (исправленное) — KPI/учёт считают по нему; здесь — аудит правки.
+  openedAtReported     DateTime? // исходное время (что нажал водитель), снимок до первой правки; null = не правили
+  openedAtAdjustedById String? // кто поправил (диспетчер/админ), uuid без навигации
+  openedAtAdjustedAt   DateTime?
+  openedAtAdjustNote   String? // причина правки (напр. «не было связи»)
   confirmedById String? // диспетчер, подтвердивший открытие
   confirmedAt   DateTime?
   closedAt      DateTime?
