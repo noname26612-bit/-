@@ -6,7 +6,9 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { Phone, Navigation, Loader2, Camera, X, FileText } from "lucide-react";
-import { fetcher, apiSend, apiUpload, ApiError } from "@/lib/fetcher";
+import { apiSend, apiUpload, ApiError } from "@/lib/fetcher";
+import { cachedFetcher } from "@/lib/offline/cached-fetcher";
+import { useOnline } from "@/lib/offline/net";
 import { sendWithRetry } from "@/lib/retry";
 import { getPositionOnce } from "@/lib/geo";
 import { compressImage } from "@/lib/image-compress";
@@ -72,25 +74,28 @@ function groupCatalog(items: WorkCatalogItemDTO[]): { name: string | null; items
 
 export function DriverTaskClient({ taskId }: { taskId: string }) {
   const key = `/api/tasks/${taskId}`;
-  const { data: task, error, isLoading, mutate } = useSWR<TaskDetailDTO>(key, fetcher, {
+  const online = useOnline();
+  // cachedFetcher: при связи кэширует ответ, без связи отдаёт сохранённое — карточка открывается офлайн.
+  const { data: task, error, isLoading, mutate } = useSWR<TaskDetailDTO>(key, cachedFetcher, {
     refreshInterval: 10_000,
   });
   // Справочник работ для ведомости — грузим только для типов с расценкой (этап 12).
   const { data: workCatalog = [] } = useSWR<WorkCatalogItemDTO[]>(
     task?.type.requiresPricing ? "/api/work-catalog" : null,
-    fetcher,
+    cachedFetcher,
   );
   // Одна активная задача (этап B): знаем про другую задачу водителя «В работе», чтобы заранее
   // заблокировать кнопку «В работу» (сервер всё равно запретит — это проактивная подсказка в UI).
   const { data: myToday = [] } = useSWR<{ id: string; status: TaskStatus; number: number }[]>(
     `/api/my/tasks?date=${todayISO()}&scope=today`,
-    fetcher,
+    cachedFetcher,
     { refreshInterval: 10_000 },
   );
-  // Открытая смена нужна, чтобы брать задачу в работу (этап D). Знаем статус смены для подсказки.
+  // Открытая смена нужна, чтобы брать задачу в работу (этап D). Кэшируем статус: смену открывают
+  // утром онлайн, а взять задачу могут уже офлайн на объекте — нужен последний известный статус.
   const { data: myShift } = useSWR<{ status: string } | null>(
     `/api/my/shift?date=${todayISO()}`,
-    fetcher,
+    cachedFetcher,
     { refreshInterval: 10_000 },
   );
 
@@ -337,6 +342,11 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
 
   return (
     <div className="pb-44">
+      {!online ? (
+        <p className="bg-amber-50 px-4 py-2 text-center text-sm text-amber-700">
+          Офлайн — показываю сохранённое
+        </p>
+      ) : null}
       {/* Шапка */}
       <div className="border-b border-neutral-100 px-4 py-3">
         <Link href="/m" className="text-sm text-neutral-500">

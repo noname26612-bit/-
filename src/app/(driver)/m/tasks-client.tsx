@@ -5,6 +5,8 @@ import Link from "next/link";
 import useSWR from "swr";
 import { Phone, Navigation } from "lucide-react";
 import { fetcher, apiSend, ApiError } from "@/lib/fetcher";
+import { cachedFetcher } from "@/lib/offline/cached-fetcher";
+import { useOnline } from "@/lib/offline/net";
 import type { TaskDTO } from "@/lib/task-dto";
 import type { TaskStatus } from "@/generated/prisma/enums";
 import {
@@ -31,7 +33,8 @@ export function DriverTasksClient({ showPayroll = true }: { showPayroll?: boolea
   const today = todayISO();
   const [tab, setTab] = useState<Tab>("today");
   const key = `/api/my/tasks?date=${today}&scope=${tab}`;
-  const { data: tasks = [], isLoading, error } = useSWR<TaskDTO[]>(key, fetcher, {
+  const online = useOnline();
+  const { data: tasks = [], isLoading, error } = useSWR<TaskDTO[]>(key, cachedFetcher, {
     refreshInterval: 10_000,
     revalidateOnFocus: true,
     keepPreviousData: true,
@@ -72,9 +75,11 @@ export function DriverTasksClient({ showPayroll = true }: { showPayroll?: boolea
           : `Завтра и позже · задач: ${tasks.length}`}
       </p>
 
-      {staleError ? (
+      {!online || staleError ? (
         <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
-          Нет связи — показываю последнее. Обновлю автоматически.
+          {online
+            ? "Нет связи — показываю последнее. Обновлю автоматически."
+            : "Офлайн — показываю сохранённое. Действия сохранятся и уйдут при связи."}
         </p>
       ) : null}
 
