@@ -7,6 +7,8 @@ import { Phone, Navigation } from "lucide-react";
 import { fetcher, apiSend, ApiError } from "@/lib/fetcher";
 import { cachedFetcher } from "@/lib/offline/cached-fetcher";
 import { useOnline } from "@/lib/offline/net";
+import { usePendingActions } from "@/lib/offline/use-queue";
+import { overlayStatus } from "@/lib/offline/overlay";
 import type { TaskDTO } from "@/lib/task-dto";
 import type { TaskStatus } from "@/generated/prisma/enums";
 import {
@@ -34,14 +36,21 @@ export function DriverTasksClient({ showPayroll = true }: { showPayroll?: boolea
   const [tab, setTab] = useState<Tab>("today");
   const key = `/api/my/tasks?date=${today}&scope=${tab}`;
   const online = useOnline();
+  const pending = usePendingActions();
   const { data: tasks = [], isLoading, error } = useSWR<TaskDTO[]>(key, cachedFetcher, {
     refreshInterval: 10_000,
     revalidateOnFocus: true,
     keepPreviousData: true,
   });
 
-  const active = tasks.filter((t) => !isTerminal(t.status));
-  const done = tasks.filter((t) => isTerminal(t.status)); // в «Сегодня» это завершённые за день
+  // Статус с учётом неотправленных переходов (офлайн-очередь): задача, завершённая без сети,
+  // сразу уходит в «завершено», и в карточке виден актуальный статус, а не серверный/кэшированный.
+  const display = (t: TaskDTO): TaskStatus =>
+    overlayStatus(t.status, pending.filter((a) => a.taskId === t.id));
+  const pendingCountFor = (t: TaskDTO): number =>
+    pending.filter((a) => a.taskId === t.id && (a.status === "pending" || a.status === "syncing")).length;
+  const active = tasks.filter((t) => !isTerminal(display(t)));
+  const done = tasks.filter((t) => isTerminal(display(t))); // в «Сегодня» это завершённые за день
   // Ошибка фонового поллинга, но задачи уже загружены — не сносим список (плохая сеть на объекте).
   const staleError = error && tasks.length > 0;
 
@@ -95,7 +104,7 @@ export function DriverTasksClient({ showPayroll = true }: { showPayroll?: boolea
         <ul className="flex flex-col gap-3">
           {active.map((t) => (
             <li key={t.id}>
-              <TaskCard task={t} today={today} />
+              <TaskCard task={t} displayStatus={display(t)} pending={pendingCountFor(t)} today={today} />
             </li>
           ))}
           {done.length > 0 ? (
@@ -105,7 +114,7 @@ export function DriverTasksClient({ showPayroll = true }: { showPayroll?: boolea
               </li>
               {done.map((t) => (
                 <li key={t.id}>
-                  <TaskCard task={t} today={today} dimmed />
+                  <TaskCard task={t} displayStatus={display(t)} pending={pendingCountFor(t)} today={today} dimmed />
                 </li>
               ))}
             </>
@@ -246,16 +255,20 @@ function EmptyState({ tab }: { tab: Tab }) {
 
 function TaskCard({
   task,
+  displayStatus,
+  pending,
   today,
   dimmed,
 }: {
   task: TaskDTO;
+  displayStatus: TaskStatus;
+  pending: number;
   today: string;
   dimmed?: boolean;
 }) {
   const dateISO = task.scheduledDate?.slice(0, 10) ?? null;
-  const overdue = dateISO !== null && dateISO < today && !isTerminal(task.status);
-  const undated = dateISO === null && !isTerminal(task.status);
+  const overdue = dateISO !== null && dateISO < today && !isTerminal(displayStatus);
+  const undated = dateISO === null && !isTerminal(displayStatus);
   const timeline =
     task.timeFrom || task.timeTo
       ? `${task.timeFrom ?? ""}${task.timeTo ? "–" + task.timeTo : ""}`
@@ -268,7 +281,7 @@ function TaskCard({
       }`}
     >
       <span
-        className={`absolute left-0 top-0 h-full w-1.5 ${STATUS_BAR[task.status]}`}
+        className={`absolute left-0 top-0 h-full w-1.5 ${STATUS_BAR[displayStatus]}`}
         aria-hidden
       />
       <Link href={`/m/${task.id}`} className="block py-3 pl-4 pr-3">
@@ -282,7 +295,10 @@ function TaskCard({
               </span>
             ) : null}
           </span>
-          <Badge className={STATUS_BADGE[task.status]}>{STATUS_LABEL[task.status]}</Badge>
+          <span className="flex items-center gap-1.5">
+            {pending > 0 ? <Badge className="bg-amber-100 text-amber-700">⏳ ждёт</Badge> : null}
+            <Badge className={STATUS_BADGE[displayStatus]}>{STATUS_LABEL[displayStatus]}</Badge>
+          </span>
         </div>
 
         {timeline || overdue || undated ? (
