@@ -23,6 +23,9 @@ export function KpiClient({ initialPeriod }: { initialPeriod: string }) {
   const [error, setError] = useState<string | null>(null);
 
   const closed = data?.closed ?? false;
+  // Видна ли зарплата (оклад/премия/итог): только админу. Диспетчер видит нарушения и суммы штрафов,
+  // но не зарплату — сервер их и не присылает (доработка №10). По умолчанию скрыто, пока не пришёл ответ.
+  const payrollVisible = data?.payrollVisible ?? false;
 
   async function runDetector() {
     setError(null);
@@ -55,9 +58,11 @@ export function KpiClient({ initialPeriod }: { initialPeriod: string }) {
     <main className="mx-auto max-w-5xl p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-neutral-900">KPI / Зарплата</h1>
+          <h1 className="text-2xl font-semibold text-neutral-900">{payrollVisible ? "KPI / Зарплата" : "KPI / Нарушения"}</h1>
           <p className="mt-1 text-sm text-neutral-500">
-            Кандидаты в нарушения, расчёт по водителям и закрытие месяца.
+            {payrollVisible
+              ? "Кандидаты в нарушения, расчёт по водителям и закрытие месяца."
+              : "Кандидаты в нарушения и штрафы по водителям."}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -94,7 +99,9 @@ export function KpiClient({ initialPeriod }: { initialPeriod: string }) {
 
           <section className="mt-8">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-neutral-900">Расчёт по водителям</h2>
+              <h2 className="text-lg font-semibold text-neutral-900">
+                {payrollVisible ? "Расчёт по водителям" : "Нарушения и штрафы по водителям"}
+              </h2>
               {!closed && (data?.drivers.length ?? 0) > 0 ? (
                 <Button variant="secondary" disabled={busy} onClick={closeMonth}>
                   Закрыть месяц
@@ -108,7 +115,13 @@ export function KpiClient({ initialPeriod }: { initialPeriod: string }) {
             ) : (
               <div className="mt-3 grid gap-3 lg:grid-cols-2">
                 {data?.drivers.map((d) => (
-                  <DriverCard key={d.driverId} driver={d} closed={closed} onAddMark={() => setManualFor(d)} />
+                  <DriverCard
+                    key={d.driverId}
+                    driver={d}
+                    closed={closed}
+                    payrollVisible={payrollVisible}
+                    onAddMark={() => setManualFor(d)}
+                  />
                 ))}
               </div>
             )}
@@ -179,6 +192,13 @@ function CandidateRow({ mark, closed, onChanged }: { mark: MarkView; closed: boo
         </span>
       ) : null}
       <span className="grow text-neutral-400">{mark.note}</span>
+      {/* Сумма штрафа за нарушение (доработка №10): тариф из настроек, без прогрессии. */}
+      {mark.penaltyAmount != null && mark.penaltyAmount !== 0 ? (
+        <span className={cn("font-medium", mark.penaltyAmount < 0 ? "text-green-700" : "text-red-600")}>
+          {mark.penaltyAmount < 0 ? "+" : "−"}
+          {formatMoney(Math.abs(mark.penaltyAmount))}
+        </span>
+      ) : null}
       {error ? <span className="text-xs text-red-600">{error}</span> : null}
       {!closed ? (
         <span className="flex gap-2">
@@ -197,43 +217,63 @@ function CandidateRow({ mark, closed, onChanged }: { mark: MarkView; closed: boo
 function DriverCard({
   driver,
   closed,
+  payrollVisible,
   onAddMark,
 }: {
   driver: DriverPayrollView;
   closed: boolean;
+  payrollVisible: boolean;
   onAddMark: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Итог штрафов по водителю для диспетчера (доработка №10): тарифы авто-нарушений + ручные штрафы.
+  // Поощрения (ручные +) в сумму штрафов не входят. У админа итог считается в зарплате (driver.penalty).
+  const penaltyTotal = driver.marks.reduce((s, m) => {
+    if (m.kind === "MANUAL") return s + (m.manualAmount != null && m.manualAmount < 0 ? -m.manualAmount : 0);
+    return s + (m.penaltyAmount ?? 0);
+  }, 0);
   return (
     <div className="rounded-xl border border-neutral-200 bg-white p-4">
       <div className="flex items-center justify-between">
         <span className="font-medium text-neutral-900">{driver.driverName}</span>
-        <span className="text-lg font-semibold text-neutral-900">{formatMoney(driver.total)}</span>
-      </div>
-      <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-neutral-600">
-        <span>Оклад</span>
-        <span className="text-right">{formatMoney(driver.baseSalary)}</span>
-        <span>Премия</span>
-        <span className="text-right">{formatMoney(driver.premiumBase)}</span>
-        <span>Штрафы</span>
-        <span className={`text-right ${driver.penalty > 0 ? "text-red-600" : ""}`}>
-          {driver.penalty > 0 ? `−${formatMoney(driver.penalty)}` : "—"}
-        </span>
-        <span>Поощрения</span>
-        <span className={`text-right ${driver.bonus > 0 ? "text-green-700" : ""}`}>
-          {driver.bonus > 0 ? `+${formatMoney(driver.bonus)}` : "—"}
-        </span>
-        <span>Бонус за акты</span>
-        <span className={`text-right ${driver.actBonus.value > 0 ? "text-green-700" : ""}`}>
-          {driver.actBonus.value > 0 ? `+${formatMoney(driver.actBonus.value)}` : "—"}
-        </span>
+        {payrollVisible ? (
+          <span className="text-lg font-semibold text-neutral-900">{formatMoney(driver.total)}</span>
+        ) : (
+          <span className={cn("text-sm font-medium", penaltyTotal > 0 ? "text-red-600" : "text-neutral-400")}>
+            {penaltyTotal > 0 ? `Штрафы −${formatMoney(penaltyTotal)}` : "Без штрафов"}
+          </span>
+        )}
       </div>
 
-      <PayoutBar driver={driver} />
-      <PremiumBar driver={driver} />
+      {/* Зарплатный расчёт — только для админа (доработка №10). Диспетчер видит лишь нарушения/штрафы. */}
+      {payrollVisible ? (
+        <>
+          <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-neutral-600">
+            <span>Оклад</span>
+            <span className="text-right">{formatMoney(driver.baseSalary)}</span>
+            <span>Премия</span>
+            <span className="text-right">{formatMoney(driver.premiumBase)}</span>
+            <span>Штрафы</span>
+            <span className={`text-right ${driver.penalty > 0 ? "text-red-600" : ""}`}>
+              {driver.penalty > 0 ? `−${formatMoney(driver.penalty)}` : "—"}
+            </span>
+            <span>Поощрения</span>
+            <span className={`text-right ${driver.bonus > 0 ? "text-green-700" : ""}`}>
+              {driver.bonus > 0 ? `+${formatMoney(driver.bonus)}` : "—"}
+            </span>
+            <span>Бонус за акты</span>
+            <span className={`text-right ${driver.actBonus.value > 0 ? "text-green-700" : ""}`}>
+              {driver.actBonus.value > 0 ? `+${formatMoney(driver.actBonus.value)}` : "—"}
+            </span>
+          </div>
 
-      {/* Прогресс бонуса за комплектность актов (этап 15, PRD §12.6) */}
-      {driver.actBonus.base > 0 || driver.actBonus.value > 0 ? <ActBonusLine driver={driver} /> : null}
+          <PayoutBar driver={driver} />
+          <PremiumBar driver={driver} />
+
+          {/* Прогресс бонуса за комплектность актов (этап 15, PRD §12.6) */}
+          {driver.actBonus.base > 0 || driver.actBonus.value > 0 ? <ActBonusLine driver={driver} /> : null}
+        </>
+      ) : null}
 
       <div className="mt-3 flex items-center gap-2">
         <Button variant="ghost" className="h-8 px-2 text-xs" onClick={() => setOpen((v) => !v)}>
@@ -248,7 +288,9 @@ function DriverCard({
 
       {open ? (
         driver.marks.length === 0 ? (
-          <p className="mt-2 text-sm text-neutral-400">Нарушений и отметок нет — полная премия.</p>
+          <p className="mt-2 text-sm text-neutral-400">
+            {payrollVisible ? "Нарушений и отметок нет — полная премия." : "Нарушений и отметок нет."}
+          </p>
         ) : (
           <ul className="mt-2 divide-y divide-neutral-100 border-t border-neutral-100 text-sm">
             {driver.marks.map((m) => (
@@ -264,6 +306,8 @@ function DriverCard({
                     {m.manualAmount >= 0 ? "+" : "−"}
                     {formatMoney(Math.abs(m.manualAmount))}
                   </span>
+                ) : m.penaltyAmount != null && m.penaltyAmount !== 0 ? (
+                  <span className="text-red-600">−{formatMoney(Math.abs(m.penaltyAmount))}</span>
                 ) : null}
               </li>
             ))}
