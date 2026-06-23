@@ -6,13 +6,12 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { Phone, Navigation, Loader2, Camera, X, FileText } from "lucide-react";
-import { apiSend, apiUpload, ApiError } from "@/lib/fetcher";
+import { ApiError } from "@/lib/fetcher";
 import { cachedFetcher } from "@/lib/offline/cached-fetcher";
 import { useOnline } from "@/lib/offline/net";
-import { enqueueOrSend } from "@/lib/offline/send";
+import { enqueueOrSend, enqueuePhoto } from "@/lib/offline/send";
 import { usePendingActions } from "@/lib/offline/use-queue";
 import { overlayStatus, hasConflict } from "@/lib/offline/overlay";
-import { sendWithRetry } from "@/lib/retry";
 import { getPositionOnce } from "@/lib/geo";
 import { compressImage } from "@/lib/image-compress";
 import type { TaskDetailDTO, WorkCatalogItemDTO } from "@/lib/task-dto";
@@ -104,7 +103,6 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
   // Действия этой задачи, ещё не дошедшие до сервера (офлайн-очередь): для оверлея статуса и бейджей.
   const pending = usePendingActions(taskId);
 
-  const [retrying, setRetrying] = useState(false);
   const [busy, setBusy] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -140,6 +138,8 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
   const displayStatus = overlayStatus(t.status, pending);
   const pendingCount = pending.filter((a) => a.status === "pending" || a.status === "syncing").length;
   const conflict = hasConflict(pending);
+  const pendingPhotos = pending.filter((a) => a.kind === "attachment" && a.blobMeta?.kind === "PHOTO").length;
+  const pendingDocs = pending.filter((a) => a.kind === "attachment" && a.blobMeta?.kind === "DOCUMENT").length;
 
   const myPhotos = t.attachments.filter((a) => a.kind === "PHOTO" && a.createdById === t.assigneeId);
   const refPhotos = t.attachments.filter((a) => a.kind === "PHOTO" && a.createdById !== t.assigneeId);
@@ -190,18 +190,15 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
     setActionError(null);
     setPhotoBusy(true);
     try {
+      let queuedAny = false;
       for (const file of Array.from(files)) {
         const blob = await compressImage(file); // сжатие до ~1920px на клиенте
-        const form = new FormData();
-        form.append("file", blob, "photo.jpg");
-        await sendWithRetry(() => apiUpload(`${key}/attachments`, form), {
-          onRetry: () => setRetrying(true),
-        });
-        setRetrying(false);
+        // Офлайн — фото сохраняется в очередь (blob в IndexedDB) и досылается при связи.
+        const { queued } = await enqueuePhoto({ url: `${key}/attachments`, taskId, blob, fileName: "photo.jpg", kind: "PHOTO" });
+        queuedAny = queuedAny || queued;
       }
-      await mutate();
+      if (!queuedAny) await mutate();
     } catch (e) {
-      setRetrying(false);
       setActionError(e instanceof ApiError ? e.message : "Не удалось загрузить фото");
     } finally {
       setPhotoBusy(false);
@@ -213,20 +210,21 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
     setActionError(null);
     setPhotoBusy(true);
     try {
+      let queuedAny = false;
       for (const file of Array.from(files)) {
         const isPdf = file.type === "application/pdf";
         const blob = isPdf ? file : await compressImage(file); // фото акта сжимаем, PDF — как есть
-        const form = new FormData();
-        form.append("file", blob, isPdf ? "akt.pdf" : "akt.jpg");
-        form.append("kind", "DOCUMENT");
-        await sendWithRetry(() => apiUpload(`${key}/attachments`, form), {
-          onRetry: () => setRetrying(true),
+        const { queued } = await enqueuePhoto({
+          url: `${key}/attachments`,
+          taskId,
+          blob,
+          fileName: isPdf ? "akt.pdf" : "akt.jpg",
+          kind: "DOCUMENT",
         });
-        setRetrying(false);
+        queuedAny = queuedAny || queued;
       }
-      await mutate();
+      if (!queuedAny) await mutate();
     } catch (e) {
-      setRetrying(false);
       setActionError(e instanceof ApiError ? e.message : "Не удалось приложить акт");
     } finally {
       setPhotoBusy(false);
@@ -237,8 +235,13 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
     setActionError(null);
     setPhotoBusy(true);
     try {
-      await apiSend(`/api/attachments/${id}`, "DELETE");
-      await mutate();
+      const { queued } = await enqueueOrSend({
+        kind: "attachment-delete",
+        method: "DELETE",
+        url: `/api/attachments/${id}`,
+        taskId,
+      });
+      if (!queued) await mutate();
     } catch (e) {
       setActionError(e instanceof ApiError ? e.message : "Не удалось удалить фото");
     } finally {
@@ -658,6 +661,9 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
               {photoBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <FileText className="h-5 w-5" />}
               Приложить акт
             </button>
+            {pendingDocs > 0 ? (
+              <p className="mt-2 text-sm text-amber-700">Акт в очереди — уйдёт при связи</p>
+            ) : null}
           </section>
         ) : null}
 
@@ -712,11 +718,6 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
 
       {/* Нижняя зона — большая кнопка следующего статуса (зона большого пальца) */}
       <div className="fixed inset-x-0 bottom-0 z-10 mx-auto max-w-md border-t border-neutral-200 bg-white/95 p-3 backdrop-blur">
-        {retrying ? (
-          <p className="mb-2 flex items-center justify-center gap-2 text-sm font-medium text-amber-700">
-            <Loader2 className="h-4 w-4 animate-spin" /> Не отправлено, повторяю…
-          </p>
-        ) : null}
         {actionError ? <p className="mb-2 text-center text-sm text-red-600">{actionError}</p> : null}
         {pendingCount > 0 ? (
           <p className="mb-2 text-center text-sm font-medium text-amber-700">
@@ -875,10 +876,8 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
             />
 
             {actionError ? <p className="mt-2 text-sm text-red-600">{actionError}</p> : null}
-            {retrying ? (
-              <p className="mt-2 flex items-center gap-2 text-sm text-amber-700">
-                <Loader2 className="h-4 w-4 animate-spin" /> Не отправлено, повторяю…
-              </p>
+            {pendingPhotos > 0 ? (
+              <p className="mt-2 text-sm text-amber-700">+{pendingPhotos} фото в очереди — уйдут при связи</p>
             ) : null}
 
             <button

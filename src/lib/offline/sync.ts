@@ -5,6 +5,7 @@
 //   невозможен) — оно остаётся в очереди для показа водителю и НЕ блокирует остальные действия.
 // Идемпотентность на сервере гарантирует, что уже применённое действие повтор не задвоит.
 import { ApiError } from "@/lib/fetcher";
+import { idbDelete, STORE_BLOBS } from "./db";
 import { listQueue, dequeue, putQueued } from "./queue";
 import { sendAction } from "./send";
 
@@ -22,6 +23,7 @@ export async function processQueue(): Promise<number> {
       try {
         await sendAction(a);
         await dequeue(a.id);
+        if (a.blobId) await idbDelete(STORE_BLOBS, a.blobId).catch(() => {}); // освобождаем фото после отправки
         sent++;
       } catch (e) {
         if (e instanceof ApiError && e.retryable) break; // нет сети/сервер лёг — стоп, повторим позже
