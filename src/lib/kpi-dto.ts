@@ -21,6 +21,11 @@ export type MarkView = {
   occurredAt: string;
   note: string | null;
   manualAmount: number | null;
+  // Сумма штрафа за это нарушение, ₽ (доработка №10): для авто-видов — базовый тариф (вес KpiRule,
+  // без прогрессии); для MANUAL — manualAmount со знаком; для legacy LATE и когда тариф неизвестен — null.
+  // Безопасно показывать диспетчеру (это «цена нарушения», не зарплата). Заполняется только там, где
+  // загружен конфиг весов (overview/buildPayroll); в одиночных ответах resolve/addMark может быть null.
+  penaltyAmount: number | null;
   resolvedById: string | null;
   resolvedAt: string | null;
 };
@@ -44,6 +49,10 @@ export type DriverPayrollView = {
 export type KpiOverview = {
   period: string;
   closed: boolean;
+  // Видна ли зарплата (оклад/премия/итог к выплате). true только для ADMIN; для DISPATCHER — false:
+  // зарплатные суммы в drivers[] обнулены НА СЕРВЕРЕ и не уходят на клиент (доработка №10, решение
+  // Артёма 23.06). У диспетчера остаются нарушения, суммы штрафов (penaltyAmount) и ручные отметки.
+  payrollVisible: boolean;
   candidates: MarkView[];
   drivers: DriverPayrollView[];
 };

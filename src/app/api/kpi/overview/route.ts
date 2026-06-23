@@ -7,13 +7,15 @@ import { periodOf } from "@/domain/kpi";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// GET /api/kpi/overview?period=YYYY-MM — картина месяца для экрана Милены: кандидаты в нарушения
-// и расчёт по всем водителям. Только диспетчер/админ. (ARCHITECTURE §7: объединяет candidates+statements.)
+// GET /api/kpi/overview?period=YYYY-MM — картина месяца: кандидаты в нарушения (для диспетчера/админа)
+// и расчёт по водителям. Зарплату (оклад/премия/итог) отдаём ТОЛЬКО админу — диспетчер её не получает
+// даже в ответе API (доработка №10, решение Артёма 23.06). Роль берём из сессии, не из запроса.
 export async function GET(req: Request) {
   try {
-    await requireDispatcher();
+    const user = await requireDispatcher();
     const period = new URL(req.url).searchParams.get("period") || periodOf(new Date());
-    return NextResponse.json(ok(await getKpiOverview(period)));
+    const payrollVisible = user.role === "ADMIN";
+    return NextResponse.json(ok(await getKpiOverview(period, { payrollVisible })));
   } catch (e) {
     return errorResponse(e);
   }

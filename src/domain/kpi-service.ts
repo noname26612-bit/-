@@ -77,7 +77,23 @@ type MarkRow = {
   driver: { name: string };
 };
 
-function toMarkView(m: MarkRow): MarkView {
+type PenaltyWeights = CalcConfig["weights"];
+
+/**
+ * Сумма штрафа за нарушение, ₽ (доработка №10): авто-вид — базовый тариф (вес KpiRule, без прогрессии);
+ * MANUAL — manualAmount со знаком; legacy LATE и отсутствие весов → null. Это «цена нарушения» —
+ * безопасно показывать диспетчеру, в отличие от итогов зарплаты.
+ */
+function penaltyForMark(kind: KpiMarkKind, manualAmount: number | null, weights?: PenaltyWeights): number | null {
+  if (kind === "MANUAL") return manualAmount;
+  if (!weights) return null;
+  if (kind === "SHIFT_LATE") return weights.SHIFT_LATE;
+  if (kind === "UNSIGNED_DOCS") return weights.UNSIGNED_DOCS;
+  if (kind === "MISSED_STOP") return weights.MISSED_STOP;
+  return null; // LATE (legacy) — тарифа нет
+}
+
+function toMarkView(m: MarkRow, weights?: PenaltyWeights): MarkView {
   return {
     id: m.id,
     driverId: m.driverId,
@@ -91,6 +107,7 @@ function toMarkView(m: MarkRow): MarkView {
     occurredAt: m.occurredAt.toISOString(),
     note: m.note,
     manualAmount: m.manualAmount,
+    penaltyAmount: penaltyForMark(m.kind, m.manualAmount, weights),
     resolvedById: m.resolvedById,
     resolvedAt: m.resolvedAt ? m.resolvedAt.toISOString() : null,
   };
@@ -146,7 +163,11 @@ async function getActCompletenessCounts(driverId: string, period: string): Promi
   return { base: tasks.length, complete: tasks.filter((t) => t._count.attachments > 0).length };
 }
 
-async function listMarks(period: string, filter: { driverId?: string; status?: KpiMarkStatus } = {}): Promise<MarkView[]> {
+async function listMarks(
+  period: string,
+  filter: { driverId?: string; status?: KpiMarkStatus } = {},
+  weights?: PenaltyWeights,
+): Promise<MarkView[]> {
   const marks = await prisma.kpiMark.findMany({
     where: {
       period,
@@ -156,7 +177,7 @@ async function listMarks(period: string, filter: { driverId?: string; status?: K
     include: markInclude,
     orderBy: { occurredAt: "asc" },
   });
-  return marks.map(toMarkView);
+  return marks.map((m) => toMarkView(m, weights));
 }
 
 async function isPeriodClosed(period: string): Promise<boolean> {
@@ -194,7 +215,7 @@ async function buildPayroll(
 ): Promise<DriverPayrollView> {
   const [snap, marks] = await Promise.all([
     prisma.payrollStatement.findUnique({ where: { driverId_period: { driverId: driver.id, period } } }),
-    listMarks(period, { driverId: driver.id, status: "CONFIRMED" }),
+    listMarks(period, { driverId: driver.id, status: "CONFIRMED" }, config.calc.weights),
   ]);
   if (snap) {
     return {
@@ -367,27 +388,81 @@ export async function runKpiDetection(): Promise<void> {
 
 // ───────────────────────────── Диспетчер: учёт и расчёт ─────────────────────────────
 
-/** Полная картина месяца для экрана Милены: кандидаты + расчёт по каждому активному водителю. */
-export async function getKpiOverview(period: string): Promise<KpiOverview> {
+/** Пустой бонус за акты — для карточки диспетчера, где зарплата скрыта (доработка №10). */
+function emptyActBonus(): ActBonusResult {
+  return {
+    base: 0,
+    complete: 0,
+    percent: 0,
+    thresholdPercent: 0,
+    amount: 0,
+    awarded: false,
+    value: 0,
+    requiredComplete: 0,
+    missing: 0,
+  };
+}
+
+/**
+ * Карточка водителя БЕЗ зарплаты — для диспетчера (доработка №10, решение Артёма 23.06): отдаём
+ * только подтверждённые нарушения с тарифами штрафов (penaltyAmount), все денежные итоги обнулены.
+ * Оклад/премию из профиля даже НЕ читаем (computePay не вызывается) — зарплата физически не покидает сервер.
+ */
+async function buildDriverMarksOnly(
+  driver: { id: string; name: string },
+  period: string,
+  closed: boolean,
+  weights: PenaltyWeights,
+): Promise<DriverPayrollView> {
+  const marks = await listMarks(period, { driverId: driver.id, status: "CONFIRMED" }, weights);
+  return {
+    driverId: driver.id,
+    driverName: driver.name,
+    period,
+    closed,
+    baseSalary: 0,
+    premiumBase: 0,
+    penalty: 0,
+    bonus: 0,
+    actBonus: emptyActBonus(),
+    premiumAfter: 0,
+    total: 0,
+    breakdown: [],
+    marks,
+  };
+}
+
+/**
+ * Полная картина месяца для экрана KPI. Кандидаты в нарушения — всегда. Расчёт по водителям:
+ * полная зарплата только если payrollVisible (ADMIN); для диспетчера (payrollVisible=false) зарплата
+ * НЕ вычисляется и НЕ отдаётся — остаются нарушения и суммы штрафов (доработка №10).
+ */
+export async function getKpiOverview(period: string, opts?: { payrollVisible?: boolean }): Promise<KpiOverview> {
   assertPeriod(period);
-  const [closed, allCandidates, profiles, config] = await Promise.all([
+  const payrollVisible = opts?.payrollVisible ?? false;
+  const [closed, profiles, config] = await Promise.all([
     isPeriodClosed(period),
-    listMarks(period, { status: "CANDIDATE" }),
     prisma.driverPayProfile.findMany({
       where: { isActive: true },
       include: { driver: { select: { id: true, name: true } } },
     }),
     loadKpiConfig(),
   ]);
+  const weights = config.calc.weights;
+  const allCandidates = await listMarks(period, { status: "CANDIDATE" }, weights);
   // Показываем кандидатов только по водителям с активным профилем — отметки исторических/внешних
   // исполнителей без профиля (Николай, внешний перевозчик) не засоряют список (PRD §12, §2).
   const trackedIds = new Set(profiles.map((p) => p.driverId));
   const candidates = allCandidates.filter((c) => trackedIds.has(c.driverId));
   const ordered = profiles.sort((a, b) => a.driver.name.localeCompare(b.driver.name, "ru"));
   const drivers = await Promise.all(
-    ordered.map((p) => buildPayroll({ id: p.driverId, name: p.driver.name }, p.baseSalary, p.premiumBase, period, config)),
+    ordered.map((p) =>
+      payrollVisible
+        ? buildPayroll({ id: p.driverId, name: p.driver.name }, p.baseSalary, p.premiumBase, period, config)
+        : buildDriverMarksOnly({ id: p.driverId, name: p.driver.name }, period, closed, weights),
+    ),
   );
-  return { period, closed, candidates, drivers };
+  return { period, closed, payrollVisible, candidates, drivers };
 }
 
 /** Подтвердить/отклонить кандидата. Пока месяц открыт — можно переотметить (PRD §12.4). */
