@@ -10,6 +10,7 @@ import { canViewTask } from "./authz";
 import { myTasksWhere, type MyTasksScope } from "./my-tasks";
 import { overdueWhere, tomorrowPassWhere } from "./attention";
 import { Errors } from "./errors";
+import { resolveOccurredAt } from "./occurred-at";
 import { notifyTaskAssignee } from "@/lib/push";
 import { geocodeAddress } from "@/lib/geocode";
 import { computeEstimate } from "./capacity-service";
@@ -617,6 +618,9 @@ export type TransitionOptions = {
   lng?: number | null;
   paymentConfirmed?: boolean; // DONE при оплате «на месте»: подтверждение получения денег (PRD §5)
   paymentAmount?: number | null; // фактически полученная сумма (по умолчанию — ожидаемая из задачи)
+  // Офлайн-режим: ISO-время момента действия на телефоне. Пишется в TaskEvent.at (и completedAt при
+  // DONE) вместо времени досылки, с проверкой достоверности (src/domain/occurred-at.ts).
+  occurredAt?: string | null;
 };
 
 export async function transitionTask(
@@ -662,10 +666,12 @@ export async function transitionTask(
     if (other) throw Errors.activeTaskExists(other.number);
   }
 
+  // Время события: момент действия на телефоне (офлайн) с проверкой достоверности, иначе — сервера.
+  const at = resolveOccurredAt(opts.occurredAt);
   const data: Prisma.TaskUpdateInput = { status: toStatus };
   if (toStatus === "ON_HOLD") data.holdReason = reason;
   if (toStatus === "CANCELLED") data.cancelReason = reason;
-  if (toStatus === "DONE") data.completedAt = new Date();
+  if (toStatus === "DONE") data.completedAt = at;
   if (task.status === "ON_HOLD" && toStatus === "ASSIGNED") data.holdReason = null;
 
   const result = await prisma.$transaction(async (tx) => {
@@ -680,6 +686,7 @@ export async function transitionTask(
         comment: reason ?? clean(opts.comment),
         lat: opts.lat ?? null,
         lng: opts.lng ?? null,
+        at,
       },
     });
     // Оплата на месте подтверждена — отдельная неизменяемая отметка в журнал (PRD §5).
@@ -693,6 +700,7 @@ export async function transitionTask(
           comment: amount != null ? `Деньги получены: ${amount} ₽` : "Деньги получены",
           lat: opts.lat ?? null,
           lng: opts.lng ?? null,
+          at,
         },
       });
     }
@@ -749,7 +757,7 @@ export async function addComment(
   taskId: string,
   text: string,
   actor: Actor,
-  opts: { lat?: number | null; lng?: number | null } = {},
+  opts: { lat?: number | null; lng?: number | null; occurredAt?: string | null } = {},
 ): Promise<void> {
   const task = await prisma.task.findUnique({ where: { id: taskId } });
   if (!task) throw Errors.notFound();
@@ -765,6 +773,7 @@ export async function addComment(
       comment,
       lat: opts.lat ?? null,
       lng: opts.lng ?? null,
+      at: resolveOccurredAt(opts.occurredAt), // офлайн: момент написания, не досылки
     },
   });
 }
