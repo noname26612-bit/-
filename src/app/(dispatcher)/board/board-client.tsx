@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import {
@@ -255,6 +255,9 @@ export function BoardClient({
         <Stat label="Не назначено сегодня" value={unassignedTodayCount} tone="muted" />
       </div>
 
+      {/* Смены водителей (№5): по каждому — статус смены, время открытия и полоса «в работе/простой». */}
+      <ShiftWorkloadBlock drivers={drivers} shifts={shifts ?? []} />
+
       {actionError ? <p className="mb-3 text-sm text-red-600">{actionError}</p> : null}
       {staleError ? (
         <p className="mb-3 flex items-center gap-1.5 text-sm text-amber-700">
@@ -367,6 +370,9 @@ type ShiftDTO = {
   driverName: string | null;
   status: "REQUESTED" | "OPEN" | "CLOSED";
   openedAt: string;
+  closedAt: string | null;
+  openedAtAdjustNote: string | null; // если время правили — причина (№3)
+  workedMinutes?: number; // отработано за день по задачам (для полосы, №5)
 };
 
 // «чч:мм» из ISO в местной зоне (время открытия смены).
@@ -386,16 +392,6 @@ function ShiftsBlock({
   shifts: ShiftDTO[];
   onChange: () => Promise<unknown>;
 }) {
-  const [busy, setBusy] = useState<string | null>(null);
-  async function confirm(id: string) {
-    setBusy(id);
-    try {
-      await apiSend(`/api/shifts/${id}/confirm`, "POST", {});
-      await onChange();
-    } finally {
-      setBusy(null);
-    }
-  }
   return (
     <section
       data-testid="shifts-block"
@@ -406,20 +402,171 @@ function ShiftsBlock({
       </h2>
       <ul className="flex flex-col gap-2">
         {shifts.map((s) => (
-          <li
-            key={s.id}
-            className="flex items-center justify-between gap-2 rounded-lg bg-white px-3 py-2"
-          >
-            <span className="text-sm text-neutral-800">
-              {s.driverName ?? "Водитель"} · открыл в {shiftHHMM(s.openedAt)}
-            </span>
-            <Button onClick={() => void confirm(s.id)} disabled={busy === s.id}>
-              Подтвердить
-            </Button>
-          </li>
+          <ShiftConfirmRow key={s.id} shift={s} onChange={onChange} />
         ))}
       </ul>
     </section>
+  );
+}
+
+// Строка подтверждения смены с возможностью поправить время открытия (№3): на случай «не было связи /
+// сел телефон» диспетчер вводит фактическое время + причину. Без правки — обычное подтверждение.
+function ShiftConfirmRow({ shift, onChange }: { shift: ShiftDTO; onChange: () => Promise<unknown> }) {
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [time, setTime] = useState(shiftHHMM(shift.openedAt));
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function confirm(withAdjust: boolean) {
+    setError(null);
+    if (withAdjust && !reason.trim()) {
+      setError("Укажите причину правки времени");
+      return;
+    }
+    setBusy(true);
+    try {
+      const body = withAdjust ? { openedAtTime: time, reason } : {};
+      await apiSend(`/api/shifts/${shift.id}/confirm`, "POST", body);
+      await onChange();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <li className="flex flex-col gap-2 rounded-lg bg-white px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm text-neutral-800">
+          {shift.driverName ?? "Водитель"} · открыл в {shiftHHMM(shift.openedAt)}
+        </span>
+        <div className="flex gap-2">
+          <Button variant="ghost" className="h-8 px-2 text-xs" onClick={() => setEditing((v) => !v)} disabled={busy}>
+            {editing ? "Отмена" : "Поправить время"}
+          </Button>
+          {!editing ? (
+            <Button onClick={() => void confirm(false)} disabled={busy}>
+              Подтвердить
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      {editing ? (
+        <div className="flex flex-col gap-2 rounded-lg bg-slate-50 p-2">
+          <p className="text-xs text-slate-500">
+            Если связи не было или сел телефон — укажите фактическое время открытия и причину.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="time"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              className="h-8 rounded border border-slate-200 px-2 text-sm tabular-nums"
+              aria-label="Фактическое время открытия"
+            />
+            <input
+              type="text"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Причина (напр. не было связи)"
+              className="h-8 min-w-[12rem] flex-1 rounded border border-slate-200 px-2 text-sm"
+            />
+            <Button onClick={() => void confirm(true)} disabled={busy}>
+              Подтвердить с правкой
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {error ? <p className="text-xs text-red-600">{error}</p> : null}
+    </li>
+  );
+}
+
+// Длительность в человекочитаемом виде: «2 ч 15 мин» / «40 мин».
+function fmtDur(min: number): string {
+  if (min <= 0) return "0 мин";
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return h > 0 ? `${h} ч ${m} мин` : `${m} мин`;
+}
+
+// Чип статуса смены для блока «Смены водителей» (№5). Цвет = смысл (ui-guidelines).
+function shiftChip(shift: ShiftDTO | null): { label: string; cls: string } {
+  const base = "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ";
+  if (!shift) return { label: "Смена не открыта", cls: base + "bg-slate-100 text-slate-500" };
+  if (shift.status === "REQUESTED") return { label: "Ждёт подтверждения", cls: base + "bg-amber-100 text-amber-700" };
+  if (shift.status === "OPEN") return { label: "Открыта", cls: base + "bg-green-100 text-green-700" };
+  return { label: "Закрыта", cls: base + "bg-slate-100 text-slate-500" };
+}
+
+// Блок «Смены водителей» (№5): по каждому водителю статус смены, время открытия и заполняющаяся
+// полоса рабочего времени — «в работе» (зелёным) и «простой» (серым) от длительности смены.
+function ShiftWorkloadBlock({ drivers, shifts }: { drivers: DriverDTO[]; shifts: ShiftDTO[] }) {
+  // «Сейчас» для живой полосы открытой смены — тикает раз в 30 с (поллинг доски тоже перерисует).
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const byDriver = new Map(shifts.map((s) => [s.driverId, s]));
+  return (
+    <section data-testid="shift-workload" className="mb-4 rounded-xl border border-slate-200 bg-white p-3">
+      <h2 className="mb-2 text-sm font-semibold text-slate-700">Смены водителей</h2>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {drivers.map((d) => (
+          <ShiftWorkloadRow key={d.id} name={d.name} shift={byDriver.get(d.id) ?? null} now={now} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ShiftWorkloadRow({ name, shift, now }: { name: string; shift: ShiftDTO | null; now: number }) {
+  const chip = shiftChip(shift);
+  if (!shift) {
+    return (
+      <div className="rounded-lg border border-slate-100 px-3 py-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="truncate text-sm font-medium text-slate-800">{name}</span>
+          <span className={chip.cls}>{chip.label}</span>
+        </div>
+        <div className="mt-2 h-2.5 rounded bg-slate-100" />
+      </div>
+    );
+  }
+  const opened = new Date(shift.openedAt).getTime();
+  const end = shift.closedAt ? new Date(shift.closedAt).getTime() : now;
+  const spanMin = Math.max(0, Math.round((end - opened) / 60000));
+  const worked = Math.min(spanMin, Math.max(0, shift.workedMinutes ?? 0));
+  const idle = Math.max(0, spanMin - worked);
+  const workedPct = spanMin > 0 ? (worked / spanMin) * 100 : 0;
+  const idlePct = spanMin > 0 ? (idle / spanMin) * 100 : 0;
+  return (
+    <div className="rounded-lg border border-slate-100 px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-sm font-medium text-slate-800">{name}</span>
+        <span className={chip.cls}>{chip.label}</span>
+      </div>
+      <div className="mt-1 text-xs text-slate-500">
+        Открыта в {shiftHHMM(shift.openedAt)}
+        {shift.closedAt ? ` · закрыта в ${shiftHHMM(shift.closedAt)}` : ""}
+        {shift.openedAtAdjustNote ? " · время скорректировано" : ""}
+      </div>
+      <div className="mt-1.5 flex h-2.5 overflow-hidden rounded bg-slate-100">
+        <div className="bg-green-500" style={{ width: `${workedPct}%` }} />
+        <div className="bg-slate-300" style={{ width: `${idlePct}%` }} />
+      </div>
+      <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-slate-500">
+        <span>
+          <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-green-500 align-middle" />В работе {fmtDur(worked)}
+        </span>
+        <span>
+          <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-slate-300 align-middle" />Простой {fmtDur(idle)}
+        </span>
+      </div>
+    </div>
   );
 }
 
