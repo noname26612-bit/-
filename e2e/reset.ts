@@ -29,5 +29,10 @@ export async function resetActiveTasks(): Promise<void> {
 // Сброс смен (этап C): @@unique(driverId, date) — повторный прогон в тот же день иначе натыкается на
 // смену прошлого теста. Удаляем все смены (в dev-БД они только тестовые).
 export async function resetShifts(): Promise<void> {
+  // Сначала чистим авто-кандидатов «поздно открыл смену»: при удалении смен ниже их KpiMark осиротевают
+  // (shiftId → NULL, onDelete SetNull) и копятся в общей dev-БД, ломая ассерт hasShiftLate по driverId
+  // в shift-adjust.spec (память проекта: ассерты вешать на уникальные данные). CONFIRMED/DISMISSED —
+  // решения диспетчера — не трогаем, только авто-кандидаты (детектор их пересоздаёт).
+  psql(`DELETE FROM \\"KpiMark\\" WHERE kind='SHIFT_LATE' AND status='CANDIDATE'`);
   psql(`DELETE FROM \\"Shift\\"`);
 }

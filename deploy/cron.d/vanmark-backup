@@ -1,0 +1,21 @@
+# Образец cron-задачи бэкапа vanmark-drive (preflight-аудит В5).
+# Установка: sudo cp deploy/cron.d/vanmark-backup /etc/cron.d/vanmark-backup ; заполнить значения ниже.
+# БЕЗ переменных BACKUP_S3_URI/BACKUP_AGE_RECIPIENT бэкап будет ТОЛЬКО локальным (на том же VPS) —
+# потеря сервера = потеря бэкапов. Off-site выгрузка идёт только в ЗАШИФРОВАННОМ виде (дампы = ПДн).
+#
+# Назначение off-site (S3-совместимое хранилище, напр. Timeweb S3):
+BACKUP_S3_URI=s3://vanmark-backups/db
+BACKUP_S3_ENDPOINT=https://s3.twcstorage.ru
+AWS_ACCESS_KEY_ID=__ключ_S3__
+AWS_SECRET_ACCESS_KEY=__секрет_S3__
+# Шифрование (публичный age-ключ; приватный — ВНЕ сервера, у владельца):
+BACKUP_AGE_RECIPIENT=age1__публичный_ключ__
+# Каталог локальных дампов и срок хранения:
+BACKUP_DIR=/backups
+BACKUP_RETENTION_DAYS=14
+# Реквизиты БД для pg_dump внутри скрипта (совпадают с .env прод-стека):
+POSTGRES_USER=vanmark
+POSTGRES_DB=vanmark
+
+# Запуск каждый день в 03:00 (час бэкапов из памяти проекта). Путь к скрипту поправить под сервер.
+0 3 * * * root /opt/vanmark/deploy/backup.sh >> /var/log/vanmark-backup.log 2>&1

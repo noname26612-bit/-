@@ -475,6 +475,24 @@ export async function updateTaskFields(
   return result;
 }
 
+/** preflight-аудит В3: у исполнителя не может быть двух задач «В работе» одновременно. Проверяется
+ *  при переназначении АКТИВНОЙ (IN_PROGRESS) задачи на другого водителя — assign/plan меняют только
+ *  assigneeId, не трогая статус, поэтому инвариант ACTIVE_TASK_EXISTS (он же в transitionTask)
+ *  дублируется здесь. Снятие назначения и неактивные задачи не затрагиваются. */
+async function assertNoOtherActiveTask(
+  taskId: string,
+  newAssigneeId: string | null,
+  currentAssigneeId: string | null,
+  status: TaskStatus,
+): Promise<void> {
+  if (!newAssigneeId || newAssigneeId === currentAssigneeId || status !== "IN_PROGRESS") return;
+  const other = await prisma.task.findFirst({
+    where: { assigneeId: newAssigneeId, status: "IN_PROGRESS", id: { not: taskId } },
+    select: { number: true },
+  });
+  if (other) throw Errors.activeTaskExists(other.number);
+}
+
 export async function assignTask(
   taskId: string,
   assigneeId: string | null,
@@ -492,6 +510,9 @@ export async function assignTask(
     const u = await prisma.user.findUnique({ where: { id: assigneeId }, select: { name: true } });
     name = u?.name ?? "";
   }
+
+  // Перенос активной задачи другому водителю не должен дать ему вторую «В работе» (В3).
+  await assertNoOtherActiveTask(taskId, assigneeId, task.assigneeId, task.status);
 
   // Назначение задаёт ASSIGNED для новой; снятие назначения возвращает в NEW.
   let status = task.status;
@@ -561,6 +582,9 @@ export async function planTask(
     const u = await prisma.user.findUnique({ where: { id: assigneeId }, select: { name: true } });
     name = u?.name ?? "";
   }
+
+  // Перенос активной задачи другому водителю не должен дать ему вторую «В работе» (В3).
+  await assertNoOtherActiveTask(taskId, assigneeId, task.assigneeId, task.status);
 
   // Статус по оси назначения (как в assignTask): NEW↔ASSIGNED, прочие статусы не трогаем.
   let status = task.status;

@@ -4,7 +4,7 @@
 // админ (гейт в route handler). Учёт отработанного/простоя по сменам — этап D, из openedAt/closedAt.
 import { prisma } from "@/lib/prisma";
 import { Errors } from "./errors";
-import { detectShiftLate, periodOf, parseHHMM } from "./kpi";
+import { detectShiftLate, periodOf, parseHHMM, dateKeyInTz, KPI_TZ } from "./kpi";
 import type { ShiftStatus } from "@/generated/prisma/enums";
 
 export type Actor = { id: string; role: string };
@@ -72,12 +72,20 @@ export async function getMyShift(driverId: string, today: string): Promise<Shift
   return shift ? toView(shift) : null;
 }
 
+/** День смены вычисляется на СЕРВЕРЕ из текущего момента в МСК (preflight-аудит В2): клиентскому
+ *  `today` не доверяем — иначе подделанная/сбитая зона телефона пишет смену не на тот день и обходит
+ *  штраф «поздно открыл» (детектор SHIFT_LATE и учёт простоя выбирают смены по date). Открытие/закрытие
+ *  смены и так online-only (PRD §15), серверное время доступно. */
+function serverShiftDate(): Date {
+  return parseDate(dateKeyInTz(new Date(), KPI_TZ));
+}
+
 /**
  * Открыть смену (водитель). Фиксирует фактическое начало рабочего дня = момент нажатия. Повторное
  * открытие в тот же день — идемпотентно (возвращаем текущую смену, не пересоздаём и не сдвигаем время).
  */
-export async function openShift(driverId: string, today: string): Promise<ShiftView> {
-  const date = parseDate(today);
+export async function openShift(driverId: string): Promise<ShiftView> {
+  const date = serverShiftDate();
   const existing = await prisma.shift.findUnique({ where: { driverId_date: { driverId, date } } });
   if (existing) return toView(existing);
   const created = await prisma.shift.create({
@@ -87,8 +95,8 @@ export async function openShift(driverId: string, today: string): Promise<ShiftV
 }
 
 /** Закрыть смену (водитель). Допустимо из REQUESTED и OPEN. Повторное закрытие — идемпотентно. */
-export async function closeShift(driverId: string, today: string): Promise<ShiftView> {
-  const date = parseDate(today);
+export async function closeShift(driverId: string): Promise<ShiftView> {
+  const date = serverShiftDate();
   const shift = await prisma.shift.findUnique({ where: { driverId_date: { driverId, date } } });
   if (!shift) throw Errors.notFound();
   if (shift.status === "CLOSED") return toView(shift);

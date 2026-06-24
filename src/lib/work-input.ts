@@ -18,7 +18,9 @@ export function parsePricingInput(body: Record<string, unknown>): PricingInput {
       }
     }
   }
-  return { items };
+  // Причина исправления цены после подписания акта (B2): обязательна только для SIGNED — проверка в домене.
+  const reason = typeof body.reason === "string" ? body.reason : undefined;
+  return { items, reason };
 }
 
 export function parseWorkItemInput(body: Record<string, unknown>): WorkItemInput {

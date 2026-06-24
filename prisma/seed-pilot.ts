@@ -95,7 +95,7 @@ const TASKS: PilotTask[] = [
     sim: D("DONE", { withPhoto: true, withAct: true }) },
 
   // ── 17 июня (dayOffset 0): сегодня, в работе ──
-  { ref: "501", type: "Доставка/возврат из ремонта", title: "Доставка ножа Ван Марк с ремонта",
+  { ref: "501", type: "Доставка из ремонта", title: "Доставка ножа Ван Марк с ремонта",
     address: "Москва, Егорьевский проезд", timeNote: "не забываем", dayOffset: 0, driver: "kashirskiy", sim: D("IN_PROGRESS") },
   { ref: "522", type: "Выездной ремонт / диагностика", title: "Ремонт/настройка ЛБМ 250 с ножом",
     orgName: "ЗАВОД ВИНРЭЙН ООО", contactName: "Иван", contactPhone: "89296585926",
@@ -118,7 +118,7 @@ const TASKS: PilotTask[] = [
     driver: "kashirskiy", sim: D("ASSIGNED") },
 
   // ── 18–19 июня (dayOffset +1): назначены, ещё не начаты ──
-  { ref: "526", type: "Доставка проданного", title: "Доставка нового Sorex 2 м + нож, забор трейд-ин Tapco Max 3,2 м",
+  { ref: "526", type: "Доставка проданного оборудования", title: "Доставка нового Sorex 2 м + нож, забор трейд-ин Tapco Max 3,2 м",
     equipment: "Sorex 2 м + нож", invoiceNumber: "1060", contactName: "Хуршед", contactPhone: "+79650168776",
     address: "Москва, рынок Синдика", addressLink: "https://maps.app.goo.gl/82dcsAz19qodbcoEA",
     paymentType: "ON_SITE", paymentNote: "доплата на выгрузке", dayOffset: 1, driver: "pisarev", sim: D("ASSIGNED") },
@@ -128,7 +128,7 @@ const TASKS: PilotTask[] = [
   { ref: "528", type: "Выездной ремонт / диагностика", title: "Ремонт/настройка Профи с ножом",
     contactName: "Тимур", contactPhone: "+79603561551", address: "Москва, Коптево, ул. Михалковская, 13А",
     paymentType: "OFFICE", dayOffset: 1, driver: "kashirskiy", sim: D("ASSIGNED") },
-  { ref: "529", type: "Забрать СДЭК/посылку", title: "Забрать груз (Желдорэкспедиция)",
+  { ref: "529", type: "Забрать посылку", title: "Забрать груз (Желдорэкспедиция)",
     invoiceNumber: "2252-1315-4018-8034", address: "Москва, ПВЗ Желдорэкспедиция (по накладной)",
     timeFrom: "13:30", paymentType: "ON_SITE", paymentAmount: 1812, timeNote: "126 кг / 0,52 м³, к выдаче с 13:30",
     dayOffset: 1, driver: "pisarev", sim: D("ASSIGNED") },

@@ -51,6 +51,7 @@ const KIND_LABEL: Record<string, string> = {
   payment_received: "Оплата",
   worksheet_submitted: "Ведомость",
   worksheet_priced: "Расценка",
+  worksheet_repriced: "Цена исправлена",
   worksheet_signed: "Акт",
   worksheet_unsigned: "Акт",
 };

@@ -18,6 +18,11 @@ services:
       timeout: 5s
       retries: 10
     # Порт наружу НЕ публикуем — БД доступна только внутри docker-сети.
+    # ВАЖНО (preflight-аудит В4): запускать прод ТОЛЬКО этим файлом (см. deploy/README.md). Если
+    # подмешать dev-файл docker-compose.yml, его секция ports (127.0.0.1:5432) откроет порт на loopback.
+    # Лимит памяти (preflight-аудит В1): резервируем БД ~512 МБ на VPS 1.9 ГБ, чтобы OOM-killer при
+    # всплеске памяти на app бил по app, а не по Postgres (перезапуск app безопаснее потери БД-процесса).
+    mem_limit: 512m
 
   app:
     build:
@@ -36,6 +41,10 @@ services:
       - uploads:/data/uploads
     expose:
       - "3000"
+    # Лимит памяти (preflight-аудит В1): ~1.2 ГБ под Node-процесс. Вместе с Postgres (512 МБ) и Caddy
+    # укладываемся в 1.9 ГБ + своп; гарантирует, что одиночный всплеск (большая загрузка) убьёт app,
+    # а не весь хост. Прод-СБОРКУ (next build тяжёлая) гонять отдельно/в tmux — это лимит рантайма.
+    mem_limit: 1200m
     healthcheck:
       test:
         ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]

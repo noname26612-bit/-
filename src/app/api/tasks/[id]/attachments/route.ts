@@ -3,7 +3,11 @@ import { ok } from "@/lib/api";
 import { requireApiUser, errorResponse, idempotencyKey } from "@/lib/api-route";
 import { addAttachment } from "@/domain/attachment-service";
 import { withIdempotency } from "@/domain/idempotency";
+import { MAX_UPLOAD_BYTES } from "@/domain/attachments";
 import { Errors } from "@/domain/errors";
+
+// Запас на multipart-обвязку поверх лимита самого файла (15 МБ): границы, заголовки полей, lat/lng.
+const MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 1024 * 1024;
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +21,14 @@ export async function POST(req: Request, { params }: Ctx) {
   try {
     const user = await requireApiUser();
     const { id } = await params;
+
+    // Ранний отбой по заявленному размеру тела ДО буферизации (preflight-аудит В1): не читаем
+    // multipart в память, если Content-Length заведомо превышает лимит. Это второй слой к Caddy
+    // request_body (Content-Length можно подделать/опустить — основной предел держит прокси).
+    const declaredLength = Number(req.headers.get("content-length") ?? "");
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_REQUEST_BYTES) {
+      throw Errors.uploadInvalid("Файл больше 15 МБ");
+    }
 
     const form = await req.formData();
     const file = form.get("file");

@@ -19,14 +19,14 @@ export async function GET(req: Request) {
   }
 }
 
-// POST /api/my/shift { op: "open"|"close", today } — открыть/закрыть смену (driverId из сессии).
+// POST /api/my/shift { op: "open"|"close" } — открыть/закрыть смену (driverId из сессии).
+// День смены берётся на сервере из времени МСК (preflight-аудит В2): клиентскому `today` не доверяем.
 export async function POST(req: Request) {
   try {
     const user = await requireDriver();
     const body = await readJson(req);
-    const today = typeof body.today === "string" ? body.today : "";
-    if (body.op === "open") return NextResponse.json(ok(await openShift(user.id, today)));
-    if (body.op === "close") return NextResponse.json(ok(await closeShift(user.id, today)));
+    if (body.op === "open") return NextResponse.json(ok(await openShift(user.id)));
+    if (body.op === "close") return NextResponse.json(ok(await closeShift(user.id)));
     throw Errors.validation("Неизвестная операция смены");
   } catch (e) {
     return errorResponse(e);

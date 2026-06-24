@@ -1,5 +1,5 @@
 // Доменные ошибки с кодом и HTTP-статусом. Хендлеры мапят их в { error: { code, message } }.
-// Коды совпадают с контрактом ARCHITECTURE §7 (FORBIDDEN_TRANSITION, PHOTO_REQUIRED, NOT_FOUND...).
+// Коды совпадают с контрактом ARCHITECTURE §7 (FORBIDDEN_TRANSITION, NOT_FOUND, VALIDATION...).
 export class DomainError extends Error {
   constructor(
     readonly code: string,
@@ -19,8 +19,6 @@ export const Errors = {
     new DomainError("FORBIDDEN_TRANSITION", "Недопустимый переход статуса", 409),
   reasonRequired: () => new DomainError("REASON_REQUIRED", "Нужно указать причину", 422),
   dateRequired: () => new DomainError("DATE_REQUIRED", "Нужна новая дата", 422),
-  photoRequired: () =>
-    new DomainError("PHOTO_REQUIRED", "Для завершения нужно фото", 422),
   paymentRequired: () =>
     new DomainError("PAYMENT_REQUIRED", "Отметьте: деньги получены или укажите причину неоплаты", 422),
   activeTaskExists: (taskNumber?: number) =>
