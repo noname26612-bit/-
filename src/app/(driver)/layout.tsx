@@ -11,7 +11,7 @@ export default async function DriverLayout({ children }: { children: ReactNode }
     <div className="mx-auto min-h-screen max-w-md bg-white">
       {/* Фоновый синхронизатор офлайн-очереди (досылка действий при возврате связи). */}
       <OfflineSync />
-      <AppHeader name={user.name} role={user.role} />
+      <AppHeader name={user.name} role={user.role} position={user.position} />
       <PwaControls />
       {children}
     </div>

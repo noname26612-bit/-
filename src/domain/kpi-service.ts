@@ -5,6 +5,7 @@
 // нет ручки, принимающей driverId извне для роли водителя.
 import { prisma } from "@/lib/prisma";
 import { Errors } from "./errors";
+import { absenceDaysByDriver } from "./absence-service";
 import {
   computePay,
   computeActBonus,
@@ -13,6 +14,7 @@ import {
   detectUnsignedDoc,
   detectMissedStop,
   dateKeyInTz,
+  utcDateKey,
   KPI_TZ,
   type CalcConfig,
   type CalcMark,
@@ -22,6 +24,7 @@ import {
 import type { KpiMarkKind, KpiMarkStatus, PayoutFloor } from "@/generated/prisma/enums";
 import type {
   MarkView,
+  MarkDetailView,
   DriverPayrollView,
   KpiOverview,
   PayProfileView,
@@ -31,6 +34,7 @@ import type {
 
 export type {
   MarkView,
+  MarkDetailView,
   DriverPayrollView,
   KpiOverview,
   PayProfileView,
@@ -77,7 +81,23 @@ type MarkRow = {
   driver: { name: string };
 };
 
-function toMarkView(m: MarkRow): MarkView {
+type PenaltyWeights = CalcConfig["weights"];
+
+/**
+ * Сумма штрафа за нарушение, ₽ (доработка №10): авто-вид — базовый тариф (вес KpiRule, без прогрессии);
+ * MANUAL — manualAmount со знаком; legacy LATE и отсутствие весов → null. Это «цена нарушения» —
+ * безопасно показывать диспетчеру, в отличие от итогов зарплаты.
+ */
+function penaltyForMark(kind: KpiMarkKind, manualAmount: number | null, weights?: PenaltyWeights): number | null {
+  if (kind === "MANUAL") return manualAmount;
+  if (!weights) return null;
+  if (kind === "SHIFT_LATE") return weights.SHIFT_LATE;
+  if (kind === "UNSIGNED_DOCS") return weights.UNSIGNED_DOCS;
+  if (kind === "MISSED_STOP") return weights.MISSED_STOP;
+  return null; // LATE (legacy) — тарифа нет
+}
+
+function toMarkView(m: MarkRow, weights?: PenaltyWeights): MarkView {
   return {
     id: m.id,
     driverId: m.driverId,
@@ -91,6 +111,7 @@ function toMarkView(m: MarkRow): MarkView {
     occurredAt: m.occurredAt.toISOString(),
     note: m.note,
     manualAmount: m.manualAmount,
+    penaltyAmount: penaltyForMark(m.kind, m.manualAmount, weights),
     resolvedById: m.resolvedById,
     resolvedAt: m.resolvedAt ? m.resolvedAt.toISOString() : null,
   };
@@ -146,7 +167,11 @@ async function getActCompletenessCounts(driverId: string, period: string): Promi
   return { base: tasks.length, complete: tasks.filter((t) => t._count.attachments > 0).length };
 }
 
-async function listMarks(period: string, filter: { driverId?: string; status?: KpiMarkStatus } = {}): Promise<MarkView[]> {
+async function listMarks(
+  period: string,
+  filter: { driverId?: string; status?: KpiMarkStatus } = {},
+  weights?: PenaltyWeights,
+): Promise<MarkView[]> {
   const marks = await prisma.kpiMark.findMany({
     where: {
       period,
@@ -156,7 +181,7 @@ async function listMarks(period: string, filter: { driverId?: string; status?: K
     include: markInclude,
     orderBy: { occurredAt: "asc" },
   });
-  return marks.map(toMarkView);
+  return marks.map((m) => toMarkView(m, weights));
 }
 
 async function isPeriodClosed(period: string): Promise<boolean> {
@@ -194,7 +219,7 @@ async function buildPayroll(
 ): Promise<DriverPayrollView> {
   const [snap, marks] = await Promise.all([
     prisma.payrollStatement.findUnique({ where: { driverId_period: { driverId: driver.id, period } } }),
-    listMarks(period, { driverId: driver.id, status: "CONFIRMED" }),
+    listMarks(period, { driverId: driver.id, status: "CONFIRMED" }, config.calc.weights),
   ]);
   if (snap) {
     return {
@@ -263,6 +288,8 @@ export async function detectCandidatesForDate(
   // Отметки заводим только по водителям, участвующим в KPI (с денежным профилем). Задачи Николая
   // и внешнего перевозчика детектор пропускает — они вне расчёта (PRD §12, §2).
   const tracked = await trackedDriverIds();
+  // Дни отпуска/больничного за этот день (№9): в них «невыполненную точку» не штрафуем.
+  const absentDays = await absenceDaysByDriver(dayKey, dayKey);
   const [tasks, shifts, settings] = await Promise.all([
     prisma.task.findMany({
       where: {
@@ -336,12 +363,16 @@ export async function detectCandidatesForDate(
         hasSignedDoc: t.attachments.length > 0,
       }),
     );
-    push(
-      detectMissedStop(
-        { driverId: t.assigneeId, taskId: t.id, scheduledDate: t.scheduledDate, status: t.status },
-        asOf,
-      ),
+    const missed = detectMissedStop(
+      { driverId: t.assigneeId, taskId: t.id, scheduledDate: t.scheduledDate, status: t.status },
+      asOf,
     );
+    // В дни отпуска/больничного водителя «невыполненную точку» не штрафуем (№9, решение Артёма).
+    const inAbsence =
+      missed && t.assigneeId != null && t.scheduledDate != null
+        ? (absentDays.get(t.assigneeId)?.has(utcDateKey(t.scheduledDate)) ?? false)
+        : false;
+    if (!inAbsence) push(missed);
   }
 
   // Метрика смены: поздно открыл смену (позже порога 9:15).
@@ -367,27 +398,139 @@ export async function runKpiDetection(): Promise<void> {
 
 // ───────────────────────────── Диспетчер: учёт и расчёт ─────────────────────────────
 
-/** Полная картина месяца для экрана Милены: кандидаты + расчёт по каждому активному водителю. */
-export async function getKpiOverview(period: string): Promise<KpiOverview> {
+/** Пустой бонус за акты — для карточки диспетчера, где зарплата скрыта (доработка №10). */
+function emptyActBonus(): ActBonusResult {
+  return {
+    base: 0,
+    complete: 0,
+    percent: 0,
+    thresholdPercent: 0,
+    amount: 0,
+    awarded: false,
+    value: 0,
+    requiredComplete: 0,
+    missing: 0,
+  };
+}
+
+/**
+ * Карточка водителя БЕЗ зарплаты — для диспетчера (доработка №10, решение Артёма 23.06): отдаём
+ * только подтверждённые нарушения с тарифами штрафов (penaltyAmount), все денежные итоги обнулены.
+ * Оклад/премию из профиля даже НЕ читаем (computePay не вызывается) — зарплата физически не покидает сервер.
+ */
+async function buildDriverMarksOnly(
+  driver: { id: string; name: string },
+  period: string,
+  closed: boolean,
+  weights: PenaltyWeights,
+): Promise<DriverPayrollView> {
+  const marks = await listMarks(period, { driverId: driver.id, status: "CONFIRMED" }, weights);
+  return {
+    driverId: driver.id,
+    driverName: driver.name,
+    period,
+    closed,
+    baseSalary: 0,
+    premiumBase: 0,
+    penalty: 0,
+    bonus: 0,
+    actBonus: emptyActBonus(),
+    premiumAfter: 0,
+    total: 0,
+    breakdown: [],
+    marks,
+  };
+}
+
+/**
+ * Лайв-актуализация кандидатов (доработка №2, решение Артёма 23.06): перед показом перепроверяем
+ * task-кандидатов (UNSIGNED_DOCS/MISSED_STOP) против ТЕКУЩЕГО состояния задачи тем же детектором.
+ * Если нарушение больше не подтверждается (задача доведена до «Выполнено» / приложен акт) — кандидата
+ * не показываем. SHIFT_LATE не перепроверяем (факт «поздно открыл смену» не исправляется задним числом).
+ * Ничего не удаляем из БД: CANDIDATE-строки остаются (детектор идемпотентен, зря не воскресит), просто
+ * скрываем устаревших из выдачи. Решённые вручную (CONFIRMED/DISMISSED) сюда не попадают (фильтр статуса).
+ */
+async function recheckTaskCandidates(candidates: MarkView[]): Promise<MarkView[]> {
+  const taskIds = [
+    ...new Set(
+      candidates
+        .filter((c) => c.taskId && (c.kind === "UNSIGNED_DOCS" || c.kind === "MISSED_STOP"))
+        .map((c) => c.taskId as string),
+    ),
+  ];
+  if (taskIds.length === 0) return candidates;
+  const tasks = await prisma.task.findMany({
+    where: { id: { in: taskIds } },
+    select: {
+      id: true,
+      assigneeId: true,
+      requiresSignedDoc: true,
+      status: true,
+      completedAt: true,
+      scheduledDate: true,
+      attachments: { where: { kind: "DOCUMENT" }, take: 1, select: { id: true } },
+    },
+  });
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const asOf = new Date();
+  return candidates.filter((c) => {
+    if (!c.taskId || (c.kind !== "UNSIGNED_DOCS" && c.kind !== "MISSED_STOP")) return true;
+    const t = byId.get(c.taskId);
+    if (!t) return true; // задачи нет в выборке — не прячем по ошибке
+    if (c.kind === "UNSIGNED_DOCS") {
+      return (
+        detectUnsignedDoc({
+          driverId: t.assigneeId,
+          taskId: t.id,
+          requiresSignedDoc: t.requiresSignedDoc,
+          status: t.status,
+          completedAt: t.completedAt,
+          hasSignedDoc: t.attachments.length > 0,
+        }) !== null
+      );
+    }
+    return (
+      detectMissedStop(
+        { driverId: t.assigneeId, taskId: t.id, scheduledDate: t.scheduledDate, status: t.status },
+        asOf,
+      ) !== null
+    );
+  });
+}
+
+/**
+ * Полная картина месяца для экрана KPI. Кандидаты в нарушения — всегда (с лайв-актуализацией №2).
+ * Расчёт по водителям: полная зарплата только если payrollVisible (ADMIN); для диспетчера
+ * (payrollVisible=false) зарплата НЕ вычисляется и НЕ отдаётся — остаются нарушения и суммы штрафов (№10).
+ */
+export async function getKpiOverview(period: string, opts?: { payrollVisible?: boolean }): Promise<KpiOverview> {
   assertPeriod(period);
-  const [closed, allCandidates, profiles, config] = await Promise.all([
+  const payrollVisible = opts?.payrollVisible ?? false;
+  const [closed, profiles, config] = await Promise.all([
     isPeriodClosed(period),
-    listMarks(period, { status: "CANDIDATE" }),
     prisma.driverPayProfile.findMany({
       where: { isActive: true },
       include: { driver: { select: { id: true, name: true } } },
     }),
     loadKpiConfig(),
   ]);
+  const weights = config.calc.weights;
+  const allCandidates = await listMarks(period, { status: "CANDIDATE" }, weights);
   // Показываем кандидатов только по водителям с активным профилем — отметки исторических/внешних
   // исполнителей без профиля (Николай, внешний перевозчик) не засоряют список (PRD §12, §2).
   const trackedIds = new Set(profiles.map((p) => p.driverId));
-  const candidates = allCandidates.filter((c) => trackedIds.has(c.driverId));
+  const trackedCandidates = allCandidates.filter((c) => trackedIds.has(c.driverId));
+  // Лайв-актуализация (№2): скрыть кандидатов, которые водитель/диспетчер уже исправил.
+  const candidates = await recheckTaskCandidates(trackedCandidates);
   const ordered = profiles.sort((a, b) => a.driver.name.localeCompare(b.driver.name, "ru"));
   const drivers = await Promise.all(
-    ordered.map((p) => buildPayroll({ id: p.driverId, name: p.driver.name }, p.baseSalary, p.premiumBase, period, config)),
+    ordered.map((p) =>
+      payrollVisible
+        ? buildPayroll({ id: p.driverId, name: p.driver.name }, p.baseSalary, p.premiumBase, period, config)
+        : buildDriverMarksOnly({ id: p.driverId, name: p.driver.name }, period, closed, weights),
+    ),
   );
-  return { period, closed, candidates, drivers };
+  return { period, closed, payrollVisible, candidates, drivers };
 }
 
 /** Подтвердить/отклонить кандидата. Пока месяц открыт — можно переотметить (PRD §12.4). */
@@ -402,6 +545,65 @@ export async function resolveMark(markId: string, status: "CONFIRMED" | "DISMISS
     include: markInclude,
   });
   return toMarkView(updated);
+}
+
+/**
+ * Детали одного нарушения для drill-down (доработка №1): разбор «почему засчиталось» — состояние
+ * задачи (UNSIGNED_DOCS/MISSED_STOP), смены (SHIFT_LATE), кто завёл/разобрал. Только админ/диспетчер
+ * (guard в route). Чувствительного не отдаём: по вложениям — лишь факт наличия акта, не путь к файлу.
+ */
+export async function getMarkDetail(markId: string): Promise<MarkDetailView> {
+  const [config, capacity, mark] = await Promise.all([
+    loadKpiConfig(),
+    prisma.capacitySettings.findUnique({
+      where: { id: "singleton" },
+      select: { shiftStartMinutes: true, shiftLateGraceMinutes: true },
+    }),
+    prisma.kpiMark.findUnique({
+      where: { id: markId },
+      include: {
+        task: {
+          select: {
+            number: true,
+            title: true,
+            status: true,
+            scheduledDate: true,
+            completedAt: true,
+            requiresSignedDoc: true,
+            attachments: { where: { kind: "DOCUMENT" }, take: 1, select: { id: true } },
+          },
+        },
+        driver: { select: { name: true } },
+        shift: { select: { date: true, openedAt: true, confirmedAt: true, status: true } },
+      },
+    }),
+  ]);
+  if (!mark) throw Errors.notFound();
+  const userIds = [mark.createdById, mark.resolvedById].filter((x): x is string => !!x);
+  const users = userIds.length
+    ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } })
+    : [];
+  const nameById = new Map(users.map((u) => [u.id, u.name]));
+  const base = toMarkView(mark, config.calc.weights);
+  const t = mark.task;
+  const s = mark.shift;
+  const startMinutes = capacity?.shiftStartMinutes ?? 540;
+  const graceMinutes = capacity?.shiftLateGraceMinutes ?? 15;
+  return {
+    ...base,
+    taskStatus: t?.status ?? null,
+    taskScheduledDate: t?.scheduledDate ? utcDateKey(t.scheduledDate) : null,
+    taskCompletedAt: t?.completedAt ? t.completedAt.toISOString() : null,
+    taskRequiresSignedDoc: t ? t.requiresSignedDoc : null,
+    taskHasDocument: t ? t.attachments.length > 0 : null,
+    shiftDate: s?.date ? utcDateKey(s.date) : null,
+    shiftOpenedAt: s?.openedAt ? s.openedAt.toISOString() : null,
+    shiftConfirmedAt: s?.confirmedAt ? s.confirmedAt.toISOString() : null,
+    shiftStatus: s?.status ?? null,
+    shiftThresholdMinutes: mark.kind === "SHIFT_LATE" ? startMinutes + graceMinutes : null,
+    createdByName: mark.createdById ? (nameById.get(mark.createdById) ?? null) : null,
+    resolvedByName: mark.resolvedById ? (nameById.get(mark.resolvedById) ?? null) : null,
+  };
 }
 
 /** Добавить ручную отметку: штраф (отрицательная сумма) или поощрение (положительная). */

@@ -73,11 +73,21 @@ enum ShiftStatus {
   CLOSED // водитель закрыл смену
 }
 
+// Тип отсутствия водителя (№9, решение Артёма 23.06): отпуск / больничный / прочее.
+enum AbsenceType {
+  VACATION // отпуск
+  SICK // больничный
+  OTHER // прочее (отгул и т.п.)
+}
+
 model User {
   id             String               @id @default(uuid())
   login          String               @unique // латиница, вводится при входе
   passwordHash   String // argon2id, см. src/lib/password.ts
   name           String // «Милена», «Алексей Писарев»
+  // Должность для отображения в шапке (напр. «Директор» у Михаила при role=ADMIN). НЕ право:
+  // права определяет role. null → подпись берётся по роли (roleLabel). Решение Артёма 23.06.2026.
+  position       String?
   phone          String?
   role           Role
   isActive       Boolean              @default(true)
@@ -98,6 +108,7 @@ model User {
   payStatements   PayrollStatement[] @relation("payStatements") // закрытые расчёты за месяцы
   uiPrefs         UiPreference[] // настройки интерфейса (раскладка доски/планирования)
   shifts          Shift[]            @relation("shiftDriver") // смены водителя (этап C)
+  absences        DriverAbsence[]    @relation("driverAbsence") // отпуска/больничные водителя (№9)
 }
 
 // Справочник типов задач (PRD §3). Новые типы заводит админ без правки кода.
@@ -148,6 +159,10 @@ model Task {
   paymentType      PaymentType @default(NONE)
   paymentAmount    Int? // «доставка 5000 водителю»
   paymentNote      String?
+  // Факт оплаты при завершении ON_SITE-задачи (№8, решение Артёма 23.06): true — деньги получены,
+  // false — завершена без оплаты (с причиной paymentMissedReason), null — не относится / нет данных.
+  paymentReceived     Boolean?
+  paymentMissedReason String? // причина неоплаты (типовой вариант или свой текст), если paymentReceived=false
   scheduledDate    DateTime?   @db.Date // null — пул «Без даты»
   timeFrom         String? // «09:00»
   timeTo           String? // «17:00»
@@ -288,7 +303,13 @@ model Shift {
   driver        User        @relation("shiftDriver", fields: [driverId], references: [id])
   date          DateTime    @db.Date // рабочий день — локальная дата открытия (МСК)
   status        ShiftStatus @default(REQUESTED)
-  openedAt      DateTime // фактическое время начала смены (момент нажатия водителя)
+  openedAt      DateTime // фактическое время начала смены; может быть скорректировано диспетчером/админом (№3)
+  // Корректировка времени открытия (№3, решение Артёма 23.06): на случай «не было связи / сел телефон».
+  // В openedAt держим АКТУАЛЬНОЕ (исправленное) — KPI/учёт считают по нему; здесь — аудит правки.
+  openedAtReported     DateTime? // исходное время (что нажал водитель), снимок до первой правки; null = не правили
+  openedAtAdjustedById String? // кто поправил (диспетчер/админ), uuid без навигации
+  openedAtAdjustedAt   DateTime?
+  openedAtAdjustNote   String? // причина правки (напр. «не было связи»)
   confirmedById String? // диспетчер, подтвердивший открытие
   confirmedAt   DateTime?
   closedAt      DateTime?
@@ -297,6 +318,24 @@ model Shift {
 
   @@unique([driverId, date]) // одна смена на водителя в день
   @@index([date, status])
+}
+
+// Отсутствие водителя (№9, решение Артёма 23.06): отпуск/больничный/прочее на диапазон дат.
+// Заводят админ и диспетчер. Влияет на Календарь загрузки (дни «гасятся») и KPI (в отпуск не штрафуем
+// «невыполненную точку»). driverId — за другого (исключение из изоляции): валидируется как DRIVER в сервисе.
+model DriverAbsence {
+  id          String      @id @default(uuid())
+  driverId    String
+  driver      User        @relation("driverAbsence", fields: [driverId], references: [id])
+  dateFrom    DateTime    @db.Date // включительно
+  dateTo      DateTime    @db.Date // включительно
+  type        AbsenceType @default(VACATION)
+  note        String?
+  createdById String? // кто завёл (uuid без навигации, как принято)
+  createdAt   DateTime    @default(now())
+
+  @@index([driverId, dateFrom])
+  @@index([dateFrom, dateTo])
 }
 
 // ───────────────────────────── KPI и зарплата (Фаза 1.5) ─────────────────────────────

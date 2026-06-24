@@ -49,7 +49,12 @@ export function DriverTasksClient({ showPayroll = true }: { showPayroll?: boolea
     overlayStatus(t.status, pending.filter((a) => a.taskId === t.id));
   const pendingCountFor = (t: TaskDTO): number =>
     pending.filter((a) => a.taskId === t.id && (a.status === "pending" || a.status === "syncing")).length;
-  const active = tasks.filter((t) => !isTerminal(display(t)));
+  // Активная задача («В работе») — наверх списка (№6). Сортировка устойчивая: внутри групп сохраняется
+  // серверный порядок (priority→дата→время→номер). Активность считаем по ОТОБРАЖАЕМОМУ статусу, чтобы
+  // задача, взятая в работу офлайн (ещё не досланная), тоже поднималась наверх.
+  const active = tasks
+    .filter((t) => !isTerminal(display(t)))
+    .sort((a, b) => (display(a) === "IN_PROGRESS" ? 0 : 1) - (display(b) === "IN_PROGRESS" ? 0 : 1));
   const done = tasks.filter((t) => isTerminal(display(t))); // в «Сегодня» это завершённые за день
   // Ошибка фонового поллинга, но задачи уже загружены — не сносим список (плохая сеть на объекте).
   const staleError = error && tasks.length > 0;
@@ -296,6 +301,11 @@ function TaskCard({
             ) : null}
           </span>
           <span className="flex items-center gap-1.5">
+            {/* Неяркая (графитовая) метка активной задачи — она же поднята наверх списка (№6).
+                По отображаемому статусу: учитывает взятие в работу офлайн. */}
+            {displayStatus === "IN_PROGRESS" ? (
+              <Badge className="border border-slate-300 text-slate-600">Активна</Badge>
+            ) : null}
             {pending > 0 ? <Badge className="bg-amber-100 text-amber-700">⏳ ждёт</Badge> : null}
             <Badge className={STATUS_BADGE[displayStatus]}>{STATUS_LABEL[displayStatus]}</Badge>
           </span>
