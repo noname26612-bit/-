@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { fetcher, apiSend } from "@/lib/fetcher";
@@ -211,40 +211,46 @@ function CandidateRow({
   }
 
   return (
-    <li className="flex flex-wrap items-center gap-3 px-3 py-2.5 text-sm">
-      <Badge className={KPI_KIND_BADGE[mark.kind]}>{KPI_KIND_LABEL[mark.kind]}</Badge>
-      <span className="text-neutral-500">{formatDate(mark.occurredAt)}</span>
-      <span className="font-medium text-neutral-800">{mark.driverName}</span>
-      {mark.taskNumber ? (
-        <span className="text-neutral-600">
-          №{mark.taskNumber} · {mark.taskTitle}
-        </span>
-      ) : null}
-      <span className="grow text-neutral-400">{mark.note}</span>
-      {/* Сумма штрафа за нарушение (доработка №10): тариф из настроек, без прогрессии. */}
-      {mark.penaltyAmount != null && mark.penaltyAmount !== 0 ? (
-        <span className={cn("font-medium", mark.penaltyAmount < 0 ? "text-green-700" : "text-red-600")}>
-          {mark.penaltyAmount < 0 ? "+" : "−"}
-          {formatMoney(Math.abs(mark.penaltyAmount))}
-        </span>
-      ) : null}
-      {error ? <span className="text-xs text-red-600">{error}</span> : null}
-      <span className="flex gap-2">
-        {/* Drill-down (№1): разбор нарушения. Доступен всегда, в т.ч. в закрытом месяце. */}
-        <Button variant="ghost" className="h-8 px-2 text-xs" disabled={busy} onClick={() => onDetails(mark.id)}>
-          Подробнее
-        </Button>
-        {!closed ? (
-          <>
-            <Button variant="secondary" className="h-8 px-3" disabled={busy} onClick={() => resolve("CONFIRMED")}>
-              Подтвердить
-            </Button>
-            <Button variant="ghost" className="h-8 px-3" disabled={busy} onClick={() => resolve("DISMISSED")}>
-              Отклонить
-            </Button>
-          </>
+    <li className="flex flex-col gap-1 px-3 py-2.5 text-sm">
+      <div className="flex items-center gap-3">
+        {/* Левая зона растёт и обрезается длинным текстом — кнопки справа не «прыгают» (№7, Артём 24.06). */}
+        <div className="flex min-w-0 grow flex-wrap items-center gap-x-2 gap-y-1">
+          <Badge className={KPI_KIND_BADGE[mark.kind]}>{KPI_KIND_LABEL[mark.kind]}</Badge>
+          <span className="text-neutral-500">{formatDate(mark.occurredAt)}</span>
+          <span className="font-medium text-neutral-800">{mark.driverName}</span>
+          {mark.taskNumber ? (
+            <span className="min-w-0 truncate text-neutral-600">
+              №{mark.taskNumber} · {mark.taskTitle}
+            </span>
+          ) : null}
+          {mark.note ? <span className="min-w-0 truncate text-neutral-400">{mark.note}</span> : null}
+        </div>
+        {/* Сумма штрафа за нарушение (доработка №10): тариф из настроек, без прогрессии. */}
+        {mark.penaltyAmount != null && mark.penaltyAmount !== 0 ? (
+          <span className={cn("shrink-0 font-medium", mark.penaltyAmount < 0 ? "text-green-700" : "text-red-600")}>
+            {mark.penaltyAmount < 0 ? "+" : "−"}
+            {formatMoney(Math.abs(mark.penaltyAmount))}
+          </span>
         ) : null}
-      </span>
+        {/* Кнопки — фиксированная группа справа, статичная при любой длине текста. */}
+        <span className="flex shrink-0 gap-2">
+          {/* Drill-down (№1): разбор нарушения. Доступен всегда, в т.ч. в закрытом месяце. */}
+          <Button variant="ghost" className="h-8 px-2 text-xs" disabled={busy} onClick={() => onDetails(mark.id)}>
+            Подробнее
+          </Button>
+          {!closed ? (
+            <>
+              <Button variant="secondary" className="h-8 px-3" disabled={busy} onClick={() => resolve("CONFIRMED")}>
+                Подтвердить
+              </Button>
+              <Button variant="ghost" className="h-8 px-3" disabled={busy} onClick={() => resolve("DISMISSED")}>
+                Отклонить
+              </Button>
+            </>
+          ) : null}
+        </span>
+      </div>
+      {error ? <span className="text-xs text-red-600">{error}</span> : null}
     </li>
   );
 }
@@ -273,39 +279,31 @@ function DriverCard({
     <div className="rounded-xl border border-neutral-200 bg-white p-4">
       <div className="flex items-center justify-between">
         <span className="font-medium text-neutral-900">{driver.driverName}</span>
-        {payrollVisible ? (
-          <span className="text-lg font-semibold text-neutral-900">{formatMoney(driver.total)}</span>
-        ) : (
+        {!payrollVisible ? (
           <span className={cn("text-sm font-medium", penaltyTotal > 0 ? "text-red-600" : "text-neutral-400")}>
             {penaltyTotal > 0 ? `Штрафы −${formatMoney(penaltyTotal)}` : "Без штрафов"}
           </span>
-        )}
+        ) : null}
       </div>
 
       {/* Зарплатный расчёт — только для админа (доработка №10). Диспетчер видит лишь нарушения/штрафы. */}
       {payrollVisible ? (
         <>
-          <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-neutral-600">
-            <span>Оклад</span>
-            <span className="text-right">{formatMoney(driver.baseSalary)}</span>
-            <span>Премия</span>
-            <span className="text-right">{formatMoney(driver.premiumBase)}</span>
-            <span>Штрафы</span>
-            <span className={`text-right ${driver.penalty > 0 ? "text-red-600" : ""}`}>
-              {driver.penalty > 0 ? `−${formatMoney(driver.penalty)}` : "—"}
-            </span>
-            <span>Поощрения</span>
-            <span className={`text-right ${driver.bonus > 0 ? "text-green-700" : ""}`}>
-              {driver.bonus > 0 ? `+${formatMoney(driver.bonus)}` : "—"}
-            </span>
-            <span>Бонус за акты</span>
-            <span className={`text-right ${driver.actBonus.value > 0 ? "text-green-700" : ""}`}>
-              {driver.actBonus.value > 0 ? `+${formatMoney(driver.actBonus.value)}` : "—"}
-            </span>
+          {/* Вариант B (Артём 24.06): крупные карточки-цифры + цветные пилюли вместо «радуги» баров. */}
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <Metric label="К выплате" value={formatMoney(driver.total)} accent />
+            <Metric label="Оклад" value={formatMoney(driver.baseSalary)} />
+            <Metric label="Премия" value={formatMoney(driver.premiumBase)} />
           </div>
-
-          <PayoutBar driver={driver} />
-          <PremiumBar driver={driver} />
+          {driver.penalty > 0 || driver.bonus > 0 || driver.actBonus.value > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {driver.penalty > 0 ? <Pill tone="red">Штрафы −{formatMoney(driver.penalty)}</Pill> : null}
+              {driver.bonus > 0 ? <Pill tone="green">Поощрения +{formatMoney(driver.bonus)}</Pill> : null}
+              {driver.actBonus.value > 0 ? (
+                <Pill tone="green">Бонус за акты +{formatMoney(driver.actBonus.value)}</Pill>
+              ) : null}
+            </div>
+          ) : null}
 
           {/* Прогресс бонуса за комплектность актов (этап 15, PRD §12.6) */}
           {driver.actBonus.base > 0 || driver.actBonus.value > 0 ? <ActBonusLine driver={driver} /> : null}
@@ -360,58 +358,22 @@ function DriverCard({
   );
 }
 
-/** Полоса состава итоговой выплаты: оклад + премия (после штрафов) + поощрения + бонус за акты. */
-function PayoutBar({ driver }: { driver: DriverPayrollView }) {
-  const premium = Math.max(0, driver.premiumAfter);
-  const segs = [
-    { key: "salary", label: "Оклад", value: driver.baseSalary, cls: "bg-neutral-400" },
-    { key: "premium", label: "Премия", value: premium, cls: "bg-green-600" },
-    { key: "bonus", label: "Поощрения", value: driver.bonus, cls: "bg-green-400" },
-    { key: "act", label: "Бонус за акты", value: driver.actBonus.value, cls: "bg-green-300" },
-  ].filter((s) => s.value > 0);
-  const total = segs.reduce((sum, s) => sum + s.value, 0) || 1;
+/** Метрик-карта (вариант B): крупное число с подписью. accent — акцентная «К выплате» (графит). */
+function Metric({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div className="mt-3">
-      <div className="mb-1.5 text-xs text-neutral-500">Из чего складывается итог</div>
-      <div className="flex h-3 overflow-hidden rounded bg-neutral-100">
-        {segs.map((s) => (
-          <div key={s.key} className={s.cls} style={{ width: `${(s.value / total) * 100}%` }} />
-        ))}
-      </div>
-      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-neutral-500">
-        {segs.map((s) => (
-          <span key={s.key} className="inline-flex items-center gap-1.5">
-            <span className={cn("h-2.5 w-2.5 rounded-sm", s.cls)} />
-            {s.label} {formatMoney(s.value)}
-          </span>
-        ))}
+    <div className={cn("rounded-lg p-2.5", accent ? "bg-neutral-900" : "bg-neutral-50")}>
+      <div className={cn("text-xs", accent ? "text-neutral-300" : "text-neutral-500")}>{label}</div>
+      <div className={cn("mt-0.5 text-lg font-semibold tabular-nums", accent ? "text-white" : "text-neutral-900")}>
+        {value}
       </div>
     </div>
   );
 }
 
-/** Шкала премии: сколько осталось (зелёным) и сколько съели штрафы (красным). Показываем только при штрафах. */
-function PremiumBar({ driver }: { driver: DriverPayrollView }) {
-  if (driver.penalty <= 0 || driver.premiumBase <= 0) return null;
-  const kept = Math.max(0, Math.min(driver.premiumBase, driver.premiumAfter));
-  const eaten = Math.min(driver.premiumBase, driver.penalty);
-  const keptPct = (kept / driver.premiumBase) * 100;
-  const eatenPct = (eaten / driver.premiumBase) * 100;
-  return (
-    <div className="mt-3">
-      <div className="mb-1.5 flex items-center justify-between text-xs">
-        <span className="text-neutral-500">Премия после штрафов</span>
-        <span className="text-red-600">штрафы −{formatMoney(driver.penalty)}</span>
-      </div>
-      <div className="flex h-2.5 overflow-hidden rounded bg-neutral-100">
-        <div className="bg-green-600" style={{ width: `${keptPct}%` }} />
-        <div className="bg-red-400" style={{ width: `${eatenPct}%` }} />
-      </div>
-      <div className="mt-1 text-xs text-neutral-500">
-        {formatMoney(kept)} из {formatMoney(driver.premiumBase)}
-      </div>
-    </div>
-  );
+/** Цветная пилюля: штрафы (красная) и поощрения/бонусы (зелёная). Показываются только ненулевые. */
+function Pill({ tone, children }: { tone: "red" | "green"; children: ReactNode }) {
+  const cls = tone === "red" ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700";
+  return <span className={cn("rounded-md px-2.5 py-1 text-xs font-medium", cls)}>{children}</span>;
 }
 
 function ActBonusLine({ driver }: { driver: DriverPayrollView }) {
