@@ -54,18 +54,16 @@ const USERS: SeedUser[] = [
 // (поле TaskType.requiresPhoto больше не используется как гейт). Иконки — имена lucide (TypeIcon).
 // requiresPricing — нужна ли ведомость работ + расценка (этап 12, PRD §13): выездной ремонт, гарантия.
 const TASK_TYPES: { name: string; icon: string; requiresSignedDoc: boolean; requiresPricing: boolean }[] = [
-  // С актом: акт выполненных работ / приёма-передачи / возврата (PRD §13).
+  // С актом: акт выполненных работ / приёма-передачи / возврата (PRD §13). Справочник синхронизирован
+  // с продом (решения Артёма 24.06): «Доставка / забор...» — объединённые направления (туда и обратно).
   { name: "Выездной ремонт / диагностика", icon: "wrench", requiresSignedDoc: true, requiresPricing: true },
-  { name: "Забор в ремонт", icon: "package-minus", requiresSignedDoc: true, requiresPricing: false },
   { name: "Гарантийный ремонт", icon: "shield-check", requiresSignedDoc: true, requiresPricing: true },
-  { name: "Доставка в аренду", icon: "truck", requiresSignedDoc: true, requiresPricing: false },
-  { name: "Забор с аренды", icon: "undo-2", requiresSignedDoc: true, requiresPricing: false },
+  { name: "Доставка / забор из аренды", icon: "truck", requiresSignedDoc: true, requiresPricing: false },
+  { name: "Доставка / забор из ремонта", icon: "package-check", requiresSignedDoc: true, requiresPricing: false },
   // Без акта.
-  { name: "Доставка из ремонта", icon: "package-check", requiresSignedDoc: false, requiresPricing: false },
-  { name: "Доставка проданного оборудования", icon: "package-plus", requiresSignedDoc: false, requiresPricing: false },
-  { name: "Сдача в ТК", icon: "warehouse", requiresSignedDoc: false, requiresPricing: false },
-  { name: "Забрать посылку", icon: "package", requiresSignedDoc: false, requiresPricing: false },
+  { name: "Доставка проданного об.", icon: "package-plus", requiresSignedDoc: false, requiresPricing: false },
   { name: "Закупка/выкуп станка", icon: "shopping-cart", requiresSignedDoc: false, requiresPricing: false },
+  { name: "Сдача / забор из ТК", icon: "package", requiresSignedDoc: false, requiresPricing: false },
   { name: "Прочее", icon: "ellipsis", requiresSignedDoc: false, requiresPricing: false },
 ];
 

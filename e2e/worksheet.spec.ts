@@ -91,7 +91,7 @@ test("ведомость не заводится для типа без расц
   const mctx = await browser.newContext();
   const milena = await mctx.newPage();
   await login(milena, "milena");
-  const id = await createAssignedTask(milena, "Алексей Каширский", "Сдача в ТК");
+  const id = await createAssignedTask(milena, "Алексей Каширский", "Сдача / забор из ТК");
 
   const detail = await (await milena.request.get(`/api/tasks/${id}`)).json();
   expect(detail.data.type.requiresPricing).toBe(false);

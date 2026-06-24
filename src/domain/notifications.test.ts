@@ -22,12 +22,12 @@ describe("pluralTasks", () => {
 });
 
 describe("buildTaskPayload", () => {
-  const task = { id: "t1", number: 476, title: "ЛБМ 200", type: { name: "Доставка в аренду" } };
+  const task = { id: "t1", number: 476, title: "ЛБМ 200", type: { name: "Доставка / забор из аренды" } };
 
   it("назначение: заголовок, тело с типом, deeplink и tag", () => {
     const p = buildTaskPayload(task, "assigned");
     expect(p.title).toBe("Новая задача №476");
-    expect(p.body).toBe("Доставка в аренду: ЛБМ 200");
+    expect(p.body).toBe("Доставка / забор из аренды: ЛБМ 200");
     expect(p.url).toBe("/m/t1");
     expect(p.tag).toBe("task-t1");
   });

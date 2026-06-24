@@ -26,7 +26,7 @@ async function createDatedTask(milena: Page, driverLabel: string, date: string):
   const title = `e2e abs ${Date.now()}-${Math.floor(Math.random() * 1e4)}`;
   await milena.goto("/tasks");
   await milena.getByRole("button", { name: "Задача" }).click();
-  await milena.locator('[data-testid="create-type"]').selectOption({ label: "Сдача в ТК" });
+  await milena.locator('[data-testid="create-type"]').selectOption({ label: "Сдача / забор из ТК" });
   await milena.getByPlaceholder("ЛБМ 200 + нож, 0,7 мм").fill(title);
   await milena.getByPlaceholder("Москва, ул. ..., д. ...").fill("Адрес e2e отпуск");
   await milena.getByRole("button", { name: "Создать", exact: true }).click();

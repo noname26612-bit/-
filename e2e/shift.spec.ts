@@ -127,7 +127,7 @@ test("без открытой смены задачу в работу взять
   const mctx = await browser.newContext();
   const milena = await mctx.newPage();
   await login(milena, "milena");
-  const id = await createAssignedTask(milena, "Алексей Писарев", "Сдача в ТК");
+  const id = await createAssignedTask(milena, "Алексей Писарев", "Сдача / забор из ТК");
 
   const dctx = await browser.newContext();
   const driver = await dctx.newPage();
