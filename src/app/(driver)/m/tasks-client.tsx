@@ -12,9 +12,7 @@ import { overlayStatus } from "@/lib/offline/overlay";
 import type { TaskDTO } from "@/lib/task-dto";
 import type { TaskStatus } from "@/generated/prisma/enums";
 import {
-  STATUS_BADGE,
   STATUS_BAR,
-  STATUS_LABEL,
   PASS_BADGE,
   PASS_LABEL,
   formatDate,
@@ -22,6 +20,7 @@ import {
   todayISO,
   navUrl,
 } from "@/lib/task-ui";
+import { StatusBadge } from "@/components/status-badge";
 import { TypeIcon } from "@/components/type-icon";
 import { Badge } from "@/components/ui/badge";
 
@@ -307,7 +306,7 @@ function TaskCard({
               <Badge className="border border-slate-300 text-slate-600">Активна</Badge>
             ) : null}
             {pending > 0 ? <Badge className="bg-amber-100 text-amber-700">⏳ ждёт</Badge> : null}
-            <Badge className={STATUS_BADGE[displayStatus]}>{STATUS_LABEL[displayStatus]}</Badge>
+            <StatusBadge status={displayStatus} />
           </span>
         </div>
 

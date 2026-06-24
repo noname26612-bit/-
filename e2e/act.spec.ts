@@ -37,7 +37,7 @@ async function createAssignedTask(milena: Page, driverLabel: string, typeLabel: 
   await milena.waitForURL(/\/tasks\/[0-9a-f-]+$/);
   const id = milena.url().split("/tasks/")[1];
   await milena.locator('[data-testid="card-assignee"]').selectOption({ label: driverLabel });
-  await expect(milena.getByText("Назначена").first()).toBeVisible();
+  await expect(milena.locator('[data-testid="card-assignee"]')).not.toHaveValue("");
   return id;
 }
 

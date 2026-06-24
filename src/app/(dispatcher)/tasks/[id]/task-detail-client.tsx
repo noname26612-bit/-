@@ -13,7 +13,6 @@ import { formatMinutes } from "@/domain/capacity";
 import type { DriverDTO, TaskDetailDTO, TaskTypeDTO } from "@/lib/task-dto";
 import type { TaskStatus } from "@/generated/prisma/enums";
 import {
-  STATUS_BADGE,
   STATUS_LABEL,
   PASS_BADGE,
   PASS_LABEL,
@@ -23,6 +22,7 @@ import {
   formatDateTime,
   formatMoney,
 } from "@/lib/task-ui";
+import { StatusBadge } from "@/components/status-badge";
 import { TypeIcon } from "@/components/type-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -240,7 +240,7 @@ export function TaskDetailClient({
         <h1 className="text-xl font-semibold text-neutral-900">
           №{task.number} · {task.title}
         </h1>
-        <Badge className={STATUS_BADGE[task.status]}>{STATUS_LABEL[task.status]}</Badge>
+        <StatusBadge status={task.status} />
         {task.priority ? <Badge className="bg-red-100 text-red-700">Срочно</Badge> : null}
       </div>
       <p className="mt-1 text-sm text-neutral-500">{task.type.name}</p>

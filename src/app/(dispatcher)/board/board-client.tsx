@@ -19,9 +19,7 @@ import { mergeOrder, moveTo } from "@/lib/pool-order";
 import { persistUiPref } from "@/lib/ui-prefs-client";
 import type { AttentionDTO, DriverDTO, TaskDTO, TaskTypeDTO } from "@/lib/task-dto";
 import {
-  STATUS_BADGE,
   STATUS_BAR,
-  STATUS_LABEL,
   PASS_BADGE,
   PASS_LABEL,
   actBadge,
@@ -31,6 +29,7 @@ import {
 } from "@/lib/task-ui";
 import { actState } from "@/domain/act";
 import { TypeIcon } from "@/components/type-icon";
+import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CreateTaskModal } from "../_components/create-task-modal";
@@ -511,11 +510,15 @@ function ShiftWorkloadBlock({ drivers, shifts }: { drivers: DriverDTO[]; shifts:
     return () => clearInterval(t);
   }, []);
   const byDriver = new Map(shifts.map((s) => [s.driverId, s]));
+  // Постоянно показываем штатных на окладе (работают каждый день); подменного/внешнего — только в день,
+  // когда у него есть смена (решение Артёма 24.06). Так ряд не засоряется «Смена не открыта» у тех,
+  // кто сегодня и не должен работать.
+  const rows = drivers.filter((d) => d.onPayroll || byDriver.has(d.id));
   return (
     <section data-testid="shift-workload" className="mb-4 rounded-xl border border-slate-200 bg-white p-3">
       <h2 className="mb-2 text-sm font-semibold text-slate-700">Смены водителей</h2>
       <div className="grid gap-2 sm:grid-cols-2">
-        {drivers.map((d) => (
+        {rows.map((d) => (
           <ShiftWorkloadRow key={d.id} name={d.name} shift={byDriver.get(d.id) ?? null} now={now} />
         ))}
       </div>
@@ -620,7 +623,7 @@ function AttentionItem({ task, chip }: { task: TaskDTO; chip: React.ReactNode })
           <TypeIcon name={task.type.icon} className="h-4 w-4 text-slate-500" />№{task.number}
           {task.priority ? <span className="text-red-500">●</span> : null}
         </span>
-        <Badge className={STATUS_BADGE[task.status]}>{STATUS_LABEL[task.status]}</Badge>
+        <StatusBadge status={task.status} />
       </div>
       <span className="truncate text-sm text-slate-800">{task.title}</span>
       <span className="truncate text-xs text-slate-500">
@@ -877,7 +880,7 @@ function BoardCard({
               {formatDateShort(task.scheduledDate)}
             </span>
           ) : null}
-          <Badge className={STATUS_BADGE[task.status]}>{STATUS_LABEL[task.status]}</Badge>
+          <StatusBadge status={task.status} />
         </div>
       </div>
       <Link

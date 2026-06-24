@@ -26,7 +26,7 @@ async function createDatedTask(milena: Page, driverLabel: string, typeLabel: str
   await milena.waitForURL(/\/tasks\/[0-9a-f-]+$/);
   const id = milena.url().split("/tasks/")[1];
   await milena.locator('[data-testid="card-assignee"]').selectOption({ label: driverLabel });
-  await expect(milena.getByText("Назначена").first()).toBeVisible();
+  await expect(milena.locator('[data-testid="card-assignee"]')).not.toHaveValue("");
   const patch = await milena.request.patch(`/api/tasks/${id}`, { data: { op: "edit", scheduledDate: date } });
   expect(patch.ok()).toBeTruthy();
   return { id, title };
