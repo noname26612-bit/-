@@ -23,6 +23,7 @@ import {
   formatMoney,
 } from "@/lib/task-ui";
 import { StatusBadge } from "@/components/status-badge";
+import { WorksheetPricingSection } from "../../_components/worksheet-pricing-section";
 import { TypeIcon } from "@/components/type-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -81,9 +82,7 @@ export function TaskDetailClient({
   const [actionError, setActionError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const docRef = useRef<HTMLInputElement | null>(null); // input для акта (этап 14): фото или PDF
-  const [prices, setPrices] = useState<Record<string, string>>({}); // расценка ведомости (этап 13)
   const [repriceOpen, setRepriceOpen] = useState(false); // правка цены после подписания акта (B2)
-  const [repriceReason, setRepriceReason] = useState(""); // причина исправления (обязательна для SIGNED)
   const [estimateInput, setEstimateInput] = useState(""); // ручная оценка времени (Фаза 2, §14)
 
   if (isLoading) return <p className="p-6 text-sm text-neutral-400">Загрузка…</p>;
@@ -169,30 +168,6 @@ export function TaskDetailClient({
       await apiSend(key, "PATCH", { estimatedMinutes: null });
       setEstimateInput("");
     });
-  // Значение поля цены: ручной ввод → уже проставленная цена → цена-подсказка из справочника → пусто.
-  // Подсказка (defaultPrice) приходит только диспетчеру (PRD §13: водителю цены не видны).
-  const priceStr = (w: { id: string; price: number | null; defaultPrice?: number | null }): string =>
-    prices[w.id] ?? (w.price != null ? String(w.price) : w.defaultPrice != null ? String(w.defaultPrice) : "");
-
-  const savePricing = () =>
-    run(async () => {
-      // Правка после подписания акта (SIGNED) — с обязательной причиной; первичная расценка — без (B2).
-      const reprice = task?.worksheetStatus === "SIGNED";
-      const items = (task?.workItems ?? []).map((w) => ({
-        id: w.id,
-        price: Number.parseInt(priceStr(w), 10) || 0,
-      }));
-      await apiSend(
-        `${key}/worksheet/pricing`,
-        "POST",
-        reprice ? { items, reason: repriceReason.trim() } : { items },
-      );
-      if (reprice) {
-        setRepriceOpen(false);
-        setRepriceReason("");
-      }
-    });
-
   const forward = NEXT_FORWARD[task.status];
   const isTerminal = task.status === "DONE" || task.status === "CANCELLED";
   const pricingVisible =
@@ -204,9 +179,6 @@ export function TaskDetailClient({
   const canReprice =
     task.type.requiresPricing && task.workItems.length > 0 && task.worksheetStatus === "SIGNED";
   const pricingEditable = pricingVisible || (canReprice && repriceOpen);
-  const pricingTotal = task.workItems.reduce((s, w) => {
-    return s + (Number.parseInt(priceStr(w), 10) || 0) * w.quantity;
-  }, 0);
   // Итог по услугам из закреплённых цен (№7): остаётся виден после расценки/подписания и в завершённой
   // заявке, когда редактируемый блок расценки уже скрыт. Сумма — из сохранённых WorkItem.price.
   const finalServicesTotal = task.workItems.reduce((s, w) => s + (w.price ?? 0) * w.quantity, 0);
@@ -421,92 +393,17 @@ export function TaskDetailClient({
       {/* Фото — отчётные (от исполнителя) и приложенные при постановке (от диспетчера) */}
       {/* Расценка ведомости — диспетчер ставит цены по позициям (этап 13, PRD §13) */}
       {pricingEditable ? (
-        <section className="mt-6">
-          <h2 className="mb-2 text-sm font-semibold text-neutral-700">
-            Расценка ведомости{" "}
-            {task.worksheetStatus === "PRICING"
-              ? "· ждёт цен"
-              : task.worksheetStatus === "SIGNED"
-                ? "· исправление после акта"
-                : "· расценено"}
-          </h2>
-          <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-neutral-200 text-xs text-neutral-400">
-                <tr>
-                  <th className="px-3 py-2">Работа</th>
-                  <th className="px-3 py-2">Кол-во</th>
-                  <th className="px-3 py-2">Цена, ₽</th>
-                  <th className="px-3 py-2 text-right">Сумма</th>
-                </tr>
-              </thead>
-              <tbody>
-                {task.workItems.map((w) => {
-                  const val = priceStr(w);
-                  const sum = (Number.parseInt(val, 10) || 0) * w.quantity;
-                  return (
-                    <tr key={w.id} className="border-b border-neutral-100 last:border-0">
-                      <td className="px-3 py-2">{w.name}</td>
-                      <td className="px-3 py-2">{w.quantity}</td>
-                      <td className="px-3 py-2">
-                        <Input
-                          type="number"
-                          value={val}
-                          disabled={busy}
-                          onChange={(e) => setPrices((p) => ({ ...p, [w.id]: e.target.value }))}
-                          className="h-8 w-28"
-                        />
-                      </td>
-                      <td className="px-3 py-2 text-right">{sum.toLocaleString("ru")}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          {task.worksheetStatus === "SIGNED" ? (
-            <div className="mt-3">
-              <label className="mb-1 block text-xs font-medium text-neutral-500">
-                Причина исправления цены (обязательно)
-              </label>
-              <Textarea
-                rows={2}
-                value={repriceReason}
-                disabled={busy}
-                onChange={(e) => setRepriceReason(e.target.value)}
-                placeholder="Например: ошибка в цене позиции, согласовано с клиентом"
-              />
-            </div>
-          ) : null}
-          <div className="mt-2 flex items-center justify-between">
-            <span className="text-sm font-medium text-neutral-700">Итого: {pricingTotal.toLocaleString("ru")} ₽</span>
-            <div className="flex gap-2">
-              {task.worksheetStatus === "SIGNED" ? (
-                <Button
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() => {
-                    setRepriceOpen(false);
-                    setRepriceReason("");
-                  }}
-                >
-                  Отмена
-                </Button>
-              ) : null}
-              <Button
-                data-testid="save-pricing"
-                disabled={busy || (task.worksheetStatus === "SIGNED" && !repriceReason.trim())}
-                onClick={savePricing}
-              >
-                {task.worksheetStatus === "PRICED"
-                  ? "Сохранить цены"
-                  : task.worksheetStatus === "SIGNED"
-                    ? "Сохранить исправление"
-                    : "Подтвердить расценку"}
-              </Button>
-            </div>
-          </div>
-        </section>
+        <WorksheetPricingSection
+          taskId={task.id}
+          workItems={task.workItems}
+          worksheetStatus={task.worksheetStatus}
+          reprice={task.worksheetStatus === "SIGNED"}
+          onSaved={() => {
+            void mutate();
+            setRepriceOpen(false);
+          }}
+          onCancel={() => setRepriceOpen(false)}
+        />
       ) : null}
 
       {/* Итоговый расчёт по услугам (№7): нередактируемый — остаётся виден после подписания акта и в
