@@ -38,7 +38,7 @@ test("№1 drill-down: детали нарушения для диспетчер
   const milena = await ctx.newPage();
   await login(milena, "milena");
 
-  const { title } = await createDatedTask(milena, "Алексей Каширский", "Сдача в ТК", yesterday);
+  const { title } = await createDatedTask(milena, "Алексей Каширский", "Сдача / забор из ТК", yesterday);
   const period = yesterday.slice(0, 7);
   expect((await milena.request.post("/api/kpi/detect", { data: { date: yesterday } })).status()).toBe(200);
 
@@ -72,7 +72,7 @@ test("№2 лайв: исправленное нарушение уходит и
   const milena = await ctx.newPage();
   await login(milena, "milena");
 
-  const { id, title } = await createDatedTask(milena, "Алексей Каширский", "Сдача в ТК", yesterday);
+  const { id, title } = await createDatedTask(milena, "Алексей Каширский", "Сдача / забор из ТК", yesterday);
   const period = yesterday.slice(0, 7);
   expect((await milena.request.post("/api/kpi/detect", { data: { date: yesterday } })).status()).toBe(200);
 

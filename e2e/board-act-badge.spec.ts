@@ -28,7 +28,7 @@ async function login(page: Page, login: string): Promise<void> {
 async function createAssignedTask(milena: Page, title: string): Promise<string> {
   await milena.goto("/tasks");
   await milena.getByRole("button", { name: "Задача" }).click();
-  await milena.locator('[data-testid="create-type"]').selectOption({ label: "Забор в ремонт" }); // акт нужен, без расценки
+  await milena.locator('[data-testid="create-type"]').selectOption({ label: "Доставка / забор из ремонта" }); // акт нужен, без расценки
   await milena.getByPlaceholder("ЛБМ 200 + нож, 0,7 мм").fill(title);
   await milena.getByPlaceholder("Москва, ул. ..., д. ...").fill("Адрес для e2e");
   await milena.getByRole("button", { name: "Создать", exact: true }).click();
