@@ -24,7 +24,10 @@ function getDummyHash(): Promise<string> {
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true, // self-hosted (Caddy), не Vercel — доверяем Host
-  session: { strategy: "jwt" },
+  // maxAge задаём явно (preflight-аудит): 30 дней — водители на телефоне не хотят частого релогина;
+  // updateAge продлевает скользящим окном при активности. JWT без серверного отзыва — это осознанный
+  // компромисс для 3 пользователей (ARCHITECTURE §6); экстренный сброс — сменой AUTH_SECRET.
+  session: { strategy: "jwt", maxAge: 30 * 24 * 60 * 60, updateAge: 24 * 60 * 60 },
   pages: { signIn: "/login" },
   providers: [
     Credentials({

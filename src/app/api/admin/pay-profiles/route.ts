@@ -29,6 +29,10 @@ export async function PUT(req: Request) {
     if (!Number.isFinite(baseSalary) || !Number.isFinite(premiumBase)) {
       throw Errors.validation("Оклад и премия должны быть числами");
     }
+    // preflight-аудит: оклад/премия не могут быть отрицательными (искажают расчёт зарплаты).
+    if (baseSalary < 0 || premiumBase < 0) {
+      throw Errors.validation("Оклад и премия не могут быть отрицательными");
+    }
     return NextResponse.json(ok(await upsertPayProfile({ driverId, baseSalary, premiumBase, isActive })));
   } catch (e) {
     return errorResponse(e);

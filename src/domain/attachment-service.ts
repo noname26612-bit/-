@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import type { AttachmentKind, Role } from "@/generated/prisma/enums";
 import { canViewTask } from "./authz";
 import { isDispatcherRole } from "./task-status";
-import { validateUpload } from "./attachments";
+import { validateUpload, matchesMagic } from "./attachments";
 import { markWorksheetSigned, revertWorksheetSignIfNoDocs } from "./work-service";
 import { Errors } from "./errors";
 import { saveUpload, readUpload, deleteUpload } from "@/lib/uploads";
@@ -50,6 +50,11 @@ export async function addAttachment(taskId: string, actor: Actor, input: NewAtta
     }
     if (verdict.code === "TOO_LARGE") throw Errors.uploadInvalid("Файл больше 15 МБ");
     throw Errors.uploadInvalid("Пустой файл");
+  }
+  // Сверка реальной сигнатуры с заявленным mime (preflight-аудит): file.type приходит от клиента,
+  // без этой проверки бинарник можно загрузить под видом image/jpeg.
+  if (!matchesMagic(input.bytes, input.mimeType)) {
+    throw Errors.uploadInvalid(kind === "DOCUMENT" ? "Файл не похож на фото или PDF" : "Файл не похож на изображение");
   }
 
   const filePath = await saveUpload(input.bytes, input.mimeType);

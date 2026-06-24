@@ -116,7 +116,7 @@ model TaskType {
   id                String  @id @default(uuid())
   name              String  @unique // «Доставка в аренду», «Забор в ремонт»...
   icon              String? // имя иконки lucide
-  requiresPhoto     Boolean @default(true) // обязательное фото при DONE (проверка на сервере — этап 4)
+  requiresPhoto     Boolean @default(true) // DEPRECATED (этап 11): фото при DONE НЕ обязательно (решение Артёма). Поле НЕ гейт; оставлено для совместимости данных. См. CLAUDE.md правило 4.
   // Ремонтный тип: ожидается подписанный акт (документ-вложение). НЕ гейт завершения —
   // отсутствие = нарушение KPI UNSIGNED_DOCS (Фаза 1.5, PRD §12.1). См. src/domain/kpi.ts.
   requiresSignedDoc Boolean @default(false)

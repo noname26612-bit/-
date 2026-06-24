@@ -269,16 +269,24 @@ export async function submitWorksheet(taskId: string, actor: Actor) {
   return result;
 }
 
-export type PricingInput = { items: { id: string; price: number }[] };
+export type PricingInput = { items: { id: string; price: number }[]; reason?: string | null };
 
 // Диспетчер проставляет цены по позициям и подтверждает расценку (PRICING→PRICED). Только диспетчер/админ.
+// Исправление цены ПОСЛЕ подписания акта (SIGNED) разрешено, но только с обязательной причиной
+// (preflight-аудит B2, решение Артёма): статус остаётся SIGNED, правка фиксируется отдельным событием.
 export async function priceWorksheet(taskId: string, input: PricingInput, actor: Actor) {
   if (!isDispatcherRole(actor.role)) throw Errors.forbidden();
   const task = await loadTaskForWorksheet(taskId, actor);
   if (!task.type.requiresPricing) throw Errors.validation("Для этого типа задачи расценка не нужна");
-  if (task.worksheetStatus !== "PRICING" && task.worksheetStatus !== "PRICED") {
+  const status = task.worksheetStatus;
+  if (status !== "PRICING" && status !== "PRICED" && status !== "SIGNED") {
     throw Errors.validation("Ведомость ещё не отправлена на расценку");
   }
+  // После подписания акта цену меняем только с причиной (бумажный акт уже подписан клиентом).
+  const reason = clean(input.reason);
+  const isReprice = status === "SIGNED";
+  if (isReprice && !reason) throw Errors.reasonRequired();
+
   // Применяем цены только к позициям этой задачи (защита от чужих id в теле запроса).
   const existing = await prisma.workItem.findMany({ where: { taskId }, select: { id: true } });
   const ids = new Set(existing.map((i) => i.id));
@@ -288,13 +296,20 @@ export async function priceWorksheet(taskId: string, input: PricingInput, actor:
     for (const u of updates) {
       await tx.workItem.update({ where: { id: u.id }, data: { price: Math.max(0, Math.trunc(u.price)) } });
     }
-    const updated = await tx.task.update({ where: { id: taskId }, data: { worksheetStatus: "PRICED" } });
+    // SIGNED остаётся SIGNED (акт приложен); первичная расценка PRICING/PRICED → PRICED.
+    const nextStatus = isReprice ? "SIGNED" : "PRICED";
+    const updated = await tx.task.update({ where: { id: taskId }, data: { worksheetStatus: nextStatus } });
     await tx.taskEvent.create({
-      data: { taskId, actorId: actor.id, kind: "worksheet_priced", comment: "Ведомость расценена" },
+      data: {
+        taskId,
+        actorId: actor.id,
+        kind: isReprice ? "worksheet_repriced" : "worksheet_priced",
+        comment: isReprice ? `Цена исправлена после подписания акта: ${reason}` : "Ведомость расценена",
+      },
     });
     return updated;
   });
-  // Пуш водителю: цены готовы (этап 13).
+  // Пуш водителю: цены готовы / исправлены (этап 13).
   notifyTaskAssignee(
     { id: task.id, number: task.number, title: task.title, assigneeId: task.assigneeId },
     "priced",

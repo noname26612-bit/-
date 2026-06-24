@@ -53,6 +53,7 @@ const KIND_LABEL: Record<string, string> = {
   payment_unpaid: "Не оплачено",
   worksheet_submitted: "Ведомость",
   worksheet_priced: "Расценка",
+  worksheet_repriced: "Цена исправлена",
   worksheet_signed: "Акт",
   worksheet_unsigned: "Акт",
 };
@@ -81,6 +82,8 @@ export function TaskDetailClient({
   const fileRef = useRef<HTMLInputElement | null>(null);
   const docRef = useRef<HTMLInputElement | null>(null); // input для акта (этап 14): фото или PDF
   const [prices, setPrices] = useState<Record<string, string>>({}); // расценка ведомости (этап 13)
+  const [repriceOpen, setRepriceOpen] = useState(false); // правка цены после подписания акта (B2)
+  const [repriceReason, setRepriceReason] = useState(""); // причина исправления (обязательна для SIGNED)
   const [estimateInput, setEstimateInput] = useState(""); // ручная оценка времени (Фаза 2, §14)
 
   if (isLoading) return <p className="p-6 text-sm text-neutral-400">Загрузка…</p>;
@@ -173,11 +176,21 @@ export function TaskDetailClient({
 
   const savePricing = () =>
     run(async () => {
+      // Правка после подписания акта (SIGNED) — с обязательной причиной; первичная расценка — без (B2).
+      const reprice = task?.worksheetStatus === "SIGNED";
       const items = (task?.workItems ?? []).map((w) => ({
         id: w.id,
         price: Number.parseInt(priceStr(w), 10) || 0,
       }));
-      await apiSend(`${key}/worksheet/pricing`, "POST", { items });
+      await apiSend(
+        `${key}/worksheet/pricing`,
+        "POST",
+        reprice ? { items, reason: repriceReason.trim() } : { items },
+      );
+      if (reprice) {
+        setRepriceOpen(false);
+        setRepriceReason("");
+      }
     });
 
   const forward = NEXT_FORWARD[task.status];
@@ -186,6 +199,11 @@ export function TaskDetailClient({
     task.type.requiresPricing &&
     task.workItems.length > 0 &&
     (task.worksheetStatus === "PRICING" || task.worksheetStatus === "PRICED");
+  // Исправление цены после подписания акта (B2): возможно для SIGNED-ведомости, открывается по кнопке
+  // в итоговом блоке. Тот же редактируемый блок, что и расценка, но с обязательным полем причины.
+  const canReprice =
+    task.type.requiresPricing && task.workItems.length > 0 && task.worksheetStatus === "SIGNED";
+  const pricingEditable = pricingVisible || (canReprice && repriceOpen);
   const pricingTotal = task.workItems.reduce((s, w) => {
     return s + (Number.parseInt(priceStr(w), 10) || 0) * w.quantity;
   }, 0);
@@ -195,7 +213,7 @@ export function TaskDetailClient({
   const showFinalServices =
     task.type.requiresPricing &&
     task.workItems.length > 0 &&
-    !pricingVisible &&
+    !pricingEditable &&
     (task.worksheetStatus === "SIGNED" || (isTerminal && task.workItems.some((w) => w.price != null)));
 
   // Акт (этап 14, PRD §13): документы (DOCUMENT) отделены от фото — PDF открывается ссылкой, не <img>.
@@ -402,10 +420,15 @@ export function TaskDetailClient({
 
       {/* Фото — отчётные (от исполнителя) и приложенные при постановке (от диспетчера) */}
       {/* Расценка ведомости — диспетчер ставит цены по позициям (этап 13, PRD §13) */}
-      {pricingVisible ? (
+      {pricingEditable ? (
         <section className="mt-6">
           <h2 className="mb-2 text-sm font-semibold text-neutral-700">
-            Расценка ведомости {task.worksheetStatus === "PRICING" ? "· ждёт цен" : "· расценено"}
+            Расценка ведомости{" "}
+            {task.worksheetStatus === "PRICING"
+              ? "· ждёт цен"
+              : task.worksheetStatus === "SIGNED"
+                ? "· исправление после акта"
+                : "· расценено"}
           </h2>
           <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white">
             <table className="w-full text-left text-sm">
@@ -441,11 +464,47 @@ export function TaskDetailClient({
               </tbody>
             </table>
           </div>
+          {task.worksheetStatus === "SIGNED" ? (
+            <div className="mt-3">
+              <label className="mb-1 block text-xs font-medium text-neutral-500">
+                Причина исправления цены (обязательно)
+              </label>
+              <Textarea
+                rows={2}
+                value={repriceReason}
+                disabled={busy}
+                onChange={(e) => setRepriceReason(e.target.value)}
+                placeholder="Например: ошибка в цене позиции, согласовано с клиентом"
+              />
+            </div>
+          ) : null}
           <div className="mt-2 flex items-center justify-between">
             <span className="text-sm font-medium text-neutral-700">Итого: {pricingTotal.toLocaleString("ru")} ₽</span>
-            <Button data-testid="save-pricing" disabled={busy} onClick={savePricing}>
-              {task.worksheetStatus === "PRICED" ? "Сохранить цены" : "Подтвердить расценку"}
-            </Button>
+            <div className="flex gap-2">
+              {task.worksheetStatus === "SIGNED" ? (
+                <Button
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => {
+                    setRepriceOpen(false);
+                    setRepriceReason("");
+                  }}
+                >
+                  Отмена
+                </Button>
+              ) : null}
+              <Button
+                data-testid="save-pricing"
+                disabled={busy || (task.worksheetStatus === "SIGNED" && !repriceReason.trim())}
+                onClick={savePricing}
+              >
+                {task.worksheetStatus === "PRICED"
+                  ? "Сохранить цены"
+                  : task.worksheetStatus === "SIGNED"
+                    ? "Сохранить исправление"
+                    : "Подтвердить расценку"}
+              </Button>
+            </div>
           </div>
         </section>
       ) : null}
@@ -480,6 +539,19 @@ export function TaskDetailClient({
           <div className="mt-2 text-right text-base font-semibold text-neutral-900">
             Итого: {finalServicesTotal.toLocaleString("ru")} ₽
           </div>
+          {/* Исправление цены после подписания акта (B2) — только с причиной, см. блок расценки. */}
+          {canReprice ? (
+            <div className="mt-2 text-right">
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() => setRepriceOpen(true)}
+                data-testid="reprice-open"
+              >
+                Исправить цену
+              </Button>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
