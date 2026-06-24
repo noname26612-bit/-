@@ -32,7 +32,7 @@ async function createAssignedTask(
   await milena.waitForURL(/\/tasks\/[0-9a-f-]+$/);
   const id = milena.url().split("/tasks/")[1];
   await milena.locator('[data-testid="card-assignee"]').selectOption({ label: driverLabel });
-  await expect(milena.getByText("Назначена").first()).toBeVisible();
+  await expect(milena.locator('[data-testid="card-assignee"]')).not.toHaveValue("");
   return { id, title };
 }
 
@@ -63,8 +63,9 @@ test("водитель проходит цепочку статусов с те�
   await card.click();
   await driver.waitForURL(/\/m\/[0-9a-f-]+$/);
 
-  // Цепочка (этап A, схлопнуто): Назначена → В работу → В работе → Завершить
-  await expect(driver.getByText("Назначена").first()).toBeVisible();
+  // Цепочка (этап A, схлопнуто): взять «В работу» → «В работе» → «Завершить».
+  // У водителя до взятия плашки статуса нет (решение Артёма 24.06) — ждём кнопку действия.
+  await expect(driver.getByRole("button", { name: "В работу" })).toBeVisible();
   await driver.getByRole("button", { name: "В работу" }).click();
   await expect(driver.getByText("В работе").first()).toBeVisible();
   // «Завершить →» открывает экран завершения; для типа без обязательного фото — подтверждаем «Завершить»

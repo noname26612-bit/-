@@ -15,7 +15,9 @@ export type TaskTypeFullDTO = TaskTypeDTO & { sortOrder: number; isActive: boole
 
 export type AssigneeDTO = { id: string; name: string; login: string } | null;
 
-export type DriverDTO = { id: string; name: string; canLogin: boolean };
+// onPayroll — есть активный денежный профиль (штатный «на окладе»). Признак «работает каждый день»
+// для блока «Смены водителей»: штатных показываем всегда, подменных/внешних — только при смене (Артём 24.06).
+export type DriverDTO = { id: string; name: string; canLogin: boolean; onPayroll: boolean };
 
 export type TaskDTO = {
   id: string;

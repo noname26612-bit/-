@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addDaysISO, STATUS_BADGE, STATUS_BAR, PASS_BADGE, STATUS_LABEL } from "./task-ui";
+import { addDaysISO, STATUS_BADGE, STATUS_BAR, PASS_BADGE, STATUS_LABEL, isStatusBadgeHidden } from "./task-ui";
 
 describe("addDaysISO (горизонт доски/планирования)", () => {
   it("прибавляет дни внутри месяца", () => {
@@ -25,7 +25,7 @@ describe("addDaysISO (горизонт доски/планирования)", ()
 
 describe("палитра статусов (спокойная, редизайн 18.06)", () => {
   const statuses = Object.keys(STATUS_LABEL) as (keyof typeof STATUS_LABEL)[];
-  const neutral = ["NEW", "ASSIGNED", "IN_PROGRESS", "ACCEPTED", "EN_ROUTE", "ON_SITE", "RESCHEDULED"] as const;
+  const neutral = ["NEW", "ASSIGNED", "ACCEPTED", "EN_ROUTE", "ON_SITE", "RESCHEDULED"] as const;
 
   it("каждый статус покрыт во всех картах", () => {
     for (const s of statuses) {
@@ -35,10 +35,25 @@ describe("палитра статусов (спокойная, редизайн 
   });
 
   it("метки контурные — без заливок и таблеток (border, не bg-/rounded-full)", () => {
+    // «В работе» — намеренное исключение: мягкая синяя заливка (решение Артёма 24.06).
     for (const s of statuses) {
+      if (s === "IN_PROGRESS") continue;
       expect(STATUS_BADGE[s]).toContain("border");
       expect(STATUS_BADGE[s]).not.toContain("bg-");
     }
+  });
+
+  it("«В работе» — мягкая синяя заливка (исключение, Артём 24.06)", () => {
+    expect(STATUS_BADGE.IN_PROGRESS).toContain("bg-blue-50");
+    expect(STATUS_BADGE.IN_PROGRESS).toContain("text-blue-700");
+  });
+
+  it("«Назначена» — метку не показываем; значимые статусы показываем", () => {
+    expect(isStatusBadgeHidden("ASSIGNED")).toBe(true);
+    expect(isStatusBadgeHidden("NEW")).toBe(false);
+    expect(isStatusBadgeHidden("IN_PROGRESS")).toBe(false);
+    expect(isStatusBadgeHidden("DONE")).toBe(false);
+    expect(isStatusBadgeHidden("ON_HOLD")).toBe(false);
   });
 
   it("цвет = смысл: зелёный=готово, красный=сорвано, янтарь=внимание", () => {

@@ -29,7 +29,7 @@ export function PricingQueueClient() {
           {queue.map((t) => (
             <li key={t.id}>
               <Link
-                href={`/tasks/${t.id}`}
+                href={`/pricing/${t.id}`}
                 className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white p-3 transition-colors hover:border-neutral-300 hover:bg-neutral-50"
               >
                 <TypeIcon name={t.type.icon} className="h-5 w-5 text-neutral-500" />

@@ -17,7 +17,6 @@ import { compressImage } from "@/lib/image-compress";
 import type { TaskDetailDTO, WorkCatalogItemDTO } from "@/lib/task-dto";
 import type { TaskStatus } from "@/generated/prisma/enums";
 import {
-  STATUS_BADGE,
   STATUS_LABEL,
   PASS_LABEL,
   formatDate,
@@ -26,8 +25,8 @@ import {
   navUrl,
   todayISO,
 } from "@/lib/task-ui";
+import { StatusBadge } from "@/components/status-badge";
 import { TypeIcon } from "@/components/type-icon";
-import { Badge } from "@/components/ui/badge";
 
 // Подсказка для UI: следующий статус по водительской цепочке. Сервер всё равно проверяет матрицу.
 // Переработка (этап A): цепочка схлопнута — «В работу» (взять) → «Завершить». Из паузы — «Вернуть в работу».
@@ -395,7 +394,7 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
               </span>
             ) : null}
           </span>
-          <Badge className={`text-sm ${STATUS_BADGE[displayStatus]}`}>{STATUS_LABEL[displayStatus]}</Badge>
+          <StatusBadge status={displayStatus} className="text-sm" />
         </div>
         <h1 className="mt-1 text-xl font-bold leading-snug text-neutral-900">{t.title}</h1>
         <p className="mt-0.5 text-sm text-neutral-500">{t.type.name}</p>

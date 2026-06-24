@@ -8,10 +8,10 @@ import { fetcher, apiSend } from "@/lib/fetcher";
 import { mergeOrder, moveTo } from "@/lib/pool-order";
 import { persistUiPref } from "@/lib/ui-prefs-client";
 import type { DriverDTO, TaskDTO } from "@/lib/task-dto";
-import { STATUS_BADGE, STATUS_BAR, STATUS_LABEL, addDaysISO, formatDate } from "@/lib/task-ui";
+import { STATUS_BAR, addDaysISO, formatDate } from "@/lib/task-ui";
+import { StatusBadge } from "@/components/status-badge";
 import { formatMinutes } from "@/domain/capacity";
 import { TypeIcon } from "@/components/type-icon";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 const LIVE = { refreshInterval: 10_000, keepPreviousData: true, revalidateOnFocus: true } as const;
@@ -371,7 +371,7 @@ function PlanCard({ task }: { task: TaskDTO }) {
           {task.timeTo ? `–${task.timeTo}` : ""}
         </span>
       ) : null}
-      <Badge className={`mt-0.5 ${STATUS_BADGE[task.status]}`}>{STATUS_LABEL[task.status]}</Badge>
+      <StatusBadge status={task.status} className="mt-0.5" />
     </div>
   );
 }

@@ -28,7 +28,7 @@ async function createAssignedTask(milena: Page, driverLabel: string, typeLabel: 
   await milena.waitForURL(/\/tasks\/[0-9a-f-]+$/);
   const id = milena.url().split("/tasks/")[1];
   await milena.locator('[data-testid="card-assignee"]').selectOption({ label: driverLabel });
-  await expect(milena.getByText("Назначена").first()).toBeVisible();
+  await expect(milena.locator('[data-testid="card-assignee"]')).not.toHaveValue("");
   return { id, title };
 }
 
@@ -45,7 +45,7 @@ test("офлайн: смена статуса копится в очереди �
   await driver.goto("/m");
   await driver.getByText(title).click(); // карточку открываем онлайн (в dev нет SW-precache офлайн)
   await driver.waitForURL(/\/m\/[0-9a-f-]+$/);
-  await expect(driver.getByText("Назначена").first()).toBeVisible();
+  await expect(driver.getByRole("button", { name: "В работу" })).toBeVisible();
 
   // Уходим в офлайн и берём задачу в работу.
   await dctx.setOffline(true);
@@ -55,7 +55,7 @@ test("офлайн: смена статуса копится в очереди �
   await expect(driver.getByText("В работе").first()).toBeVisible();
   await expect(driver.getByText(/Не отправлено/)).toBeVisible();
 
-  // На сервере действие ещё НЕ применилось (офлайн) — статус остаётся «Назначена».
+  // На сервере действие ещё НЕ применилось (офлайн) — статус остаётся ASSIGNED.
   const beforeSync = await milena.request.get(`/api/tasks/${id}`);
   expect((await beforeSync.json()).data.status).toBe("ASSIGNED");
 

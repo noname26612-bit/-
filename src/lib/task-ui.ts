@@ -24,11 +24,12 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
 };
 
 // Бейдж статуса — контурная метка (рамка + текст, прозрачный фон). Графит для нейтральных,
-// акцент только у «готово» (зелёный), «сорвано» (красный) и «внимание» (янтарь).
+// акцент только у «готово» (зелёный), «сорвано» (красный) и «внимание» (янтарь). Исключение —
+// «В работе»: мягкая синяя ЗАЛИВКА (решение Артёма 24.06), чтобы активная задача читалась в списке.
 export const STATUS_BADGE: Record<TaskStatus, string> = {
   NEW: "border border-slate-300 text-slate-600",
   ASSIGNED: "border border-slate-300 text-slate-600",
-  IN_PROGRESS: "border border-slate-300 text-slate-600",
+  IN_PROGRESS: "bg-blue-50 text-blue-700",
   ACCEPTED: "border border-slate-300 text-slate-600", // legacy
   EN_ROUTE: "border border-slate-300 text-slate-600", // legacy
   ON_SITE: "border border-slate-300 text-slate-600", // legacy
@@ -37,6 +38,16 @@ export const STATUS_BADGE: Record<TaskStatus, string> = {
   RESCHEDULED: "border border-slate-300 text-slate-600",
   CANCELLED: "border border-red-600 text-red-700",
 };
+
+// Статусы, у которых плашку-бейдж не показываем вовсе (визуальный шум). «Назначена» — самый частый
+// рабочий статус, метка не несёт информации (решение Артёма 24.06). «Новая» оставляем — это сигнал
+// «ещё не назначена никому». Единая точка правды для всех экранов — компонент StatusBadge.
+const HIDDEN_STATUS_BADGES: ReadonlySet<TaskStatus> = new Set<TaskStatus>(["ASSIGNED"]);
+
+/** Скрыта ли плашка статуса (для ASSIGNED — да). Используется компонентом StatusBadge. */
+export function isStatusBadgeHidden(status: TaskStatus): boolean {
+  return HIDDEN_STATUS_BADGES.has(status);
+}
 
 // Левая полоса-«корешок» карточки. Нейтральный графит для большинства; цвет загорается только
 // у трёх смысловых состояний (готово / сорвано / внимание).

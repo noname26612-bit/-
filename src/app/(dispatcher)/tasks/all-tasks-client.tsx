@@ -7,11 +7,13 @@ import { Plus } from "lucide-react";
 import { fetcher } from "@/lib/fetcher";
 import type { DriverDTO, TaskDTO, TaskTypeDTO } from "@/lib/task-dto";
 import { actState } from "@/domain/act";
-import { STATUS_BADGE, STATUS_LABEL, STATUS_ORDER, actBadge, formatDate } from "@/lib/task-ui";
+import { STATUS_LABEL, STATUS_ORDER, actBadge, formatDate } from "@/lib/task-ui";
+import { StatusBadge } from "@/components/status-badge";
 import { TypeIcon } from "@/components/type-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import { Select } from "@/components/ui/select";
 import { CreateTaskModal } from "../_components/create-task-modal";
 
@@ -78,8 +80,8 @@ export function AllTasksClient({
             </option>
           ))}
         </Select>
-        <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-        <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+        <DateField value={dateFrom} onChange={setDateFrom} />
+        <DateField value={dateTo} onChange={setDateTo} />
       </div>
 
       {isLoading && tasks.length === 0 ? (
@@ -143,7 +145,7 @@ export function AllTasksClient({
                   <td className="px-3 py-2 text-neutral-500">{formatDate(t.scheduledDate)}</td>
                   <td className="px-3 py-2 text-neutral-600">{t.assignee?.name ?? "—"}</td>
                   <td className="px-3 py-2">
-                    <Badge className={STATUS_BADGE[t.status]}>{STATUS_LABEL[t.status]}</Badge>
+                    <StatusBadge status={t.status} />
                   </td>
                   <td className="px-3 py-2">
                     <ActCell task={t} />

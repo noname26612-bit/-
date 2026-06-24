@@ -31,14 +31,15 @@ test("диспетчер: создание → назначение → пере
   await page.waitForURL(/\/tasks\/[0-9a-f-]+$/);
   await expect(page.getByRole("heading", { name: /№\d+/ })).toBeVisible();
 
-  // назначение исполнителя → статус «Назначена»
+  // назначение исполнителя (плашку «Назначена» не показываем — проверяем сам факт выбора)
   await page.locator('[data-testid="card-assignee"]').selectOption({ label: "Алексей Писарев" });
-  await expect(page.getByText("Назначена").first()).toBeVisible();
+  await expect(page.locator('[data-testid="card-assignee"]')).not.toHaveValue("");
 
   // перенос на новую дату → событие «Перенос» в истории
   await page.getByRole("button", { name: "Перенести" }).click();
   const reDialog = page.getByRole("dialog");
-  await reDialog.locator('input[type="date"]').fill("2026-06-20");
+  await reDialog.locator('[data-testid="reschedule-date"]').fill("2026-06-20");
+  await reDialog.locator('[data-testid="reschedule-date"]').press("Enter");
   await reDialog.getByRole("button", { name: "Перенести" }).click();
   await expect(page.getByText("Перенос")).toBeVisible();
 

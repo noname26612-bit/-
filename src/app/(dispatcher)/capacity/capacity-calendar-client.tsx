@@ -9,6 +9,8 @@ import type { TaskDTO } from "@/lib/task-dto";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
+import { CalendarPlus } from "lucide-react";
+import { DateField } from "@/components/ui/date-field";
 
 const HORIZON_DAYS = 14; // 2 недели (PRD §14.4)
 
@@ -108,8 +110,8 @@ export function CapacityCalendarClient() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => setAbsOpen(true)}>
-            Отпуска
+          <Button onClick={() => setAbsOpen(true)} className="h-11 px-5">
+            <CalendarPlus className="h-4 w-4" /> Внести отсутствие
           </Button>
           <Button variant="secondary" onClick={() => setOffset((o) => o - HORIZON_DAYS)}>
             ‹ Раньше
@@ -135,7 +137,7 @@ export function CapacityCalendarClient() {
           <span className="h-3 w-3 rounded bg-red-100" /> перегруз (&gt;100%)
         </span>
         <span className="inline-flex items-center gap-1">
-          <span className="h-3 w-3 rounded bg-neutral-200" /> отпуск / нет на работе
+          <span className="h-3 w-3 rounded bg-red-800" /> отпуск / нет на работе
         </span>
         {data ? <span>· рабочий день {formatMinutes(data.workdayMinutes)}</span> : null}
       </div>
@@ -186,12 +188,12 @@ export function CapacityCalendarClient() {
                       return (
                         <td key={day} className="p-1 text-center">
                           <div
-                            className="flex h-14 w-full flex-col items-center justify-center gap-0.5 rounded-md bg-neutral-200 text-neutral-500"
+                            className="flex h-14 w-full flex-col items-center justify-center gap-0.5 rounded-md bg-red-800 text-red-50"
                             title={ABSENCE_LABEL[abs.type] + (abs.note ? ` · ${abs.note}` : "")}
                           >
                             <span className="text-[11px] font-medium leading-tight">{ABSENCE_SHORT[abs.type]}</span>
                             {cell.count > 0 ? (
-                              <span className="text-[10px] font-semibold leading-tight text-red-600">
+                              <span className="text-[10px] font-semibold leading-tight text-amber-300">
                                 {cell.count} зад.!
                               </span>
                             ) : null}
@@ -331,10 +333,10 @@ function AbsenceManager({
             <option value="OTHER">Отсутствие</option>
           </select>
           <label className="flex items-center gap-2 text-sm text-neutral-600">
-            С <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${inputCls} flex-1`} />
+            С <DateField value={from} onChange={setFrom} className="flex-1" />
           </label>
           <label className="flex items-center gap-2 text-sm text-neutral-600">
-            По <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={`${inputCls} flex-1`} />
+            По <DateField value={to} onChange={setTo} className="flex-1" />
           </label>
         </div>
         <input

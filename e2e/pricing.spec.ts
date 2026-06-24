@@ -22,7 +22,7 @@ async function createAssignedTask(milena: Page, driverLabel: string, typeLabel: 
   await milena.waitForURL(/\/tasks\/[0-9a-f-]+$/);
   const id = milena.url().split("/tasks/")[1];
   await milena.locator('[data-testid="card-assignee"]').selectOption({ label: driverLabel });
-  await expect(milena.getByText("Назначена").first()).toBeVisible();
+  await expect(milena.locator('[data-testid="card-assignee"]')).not.toHaveValue("");
   return id;
 }
 
@@ -106,9 +106,11 @@ test("расценка (UI): диспетчер видит ведомость, �
   await login(driver, "kashirskiy");
   await fillAndSubmit(driver, id);
 
-  // диспетчер открывает карточку → блок расценки
-  await milena.goto(`/tasks/${id}`);
+  // диспетчер открывает компактный экран расценки из очереди → сразу блок цен (решение Артёма 24.06)
+  await milena.goto(`/pricing/${id}`);
   await expect(milena.getByText(/Расценка ведомости/)).toBeVisible();
+  // кнопка «Открыть всю заявку» ведёт в полную карточку
+  await expect(milena.getByRole("link", { name: "Открыть всю заявку" })).toHaveAttribute("href", `/tasks/${id}`);
   // проставляет цену в первую строку и подтверждает
   await milena.locator('input[type="number"]').first().fill("1200");
   await milena.locator('[data-testid="save-pricing"]').click();
