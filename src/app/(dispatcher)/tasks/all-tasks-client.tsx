@@ -13,6 +13,7 @@ import { TypeIcon } from "@/components/type-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import { Select } from "@/components/ui/select";
 import { CreateTaskModal } from "../_components/create-task-modal";
 
@@ -79,8 +80,8 @@ export function AllTasksClient({
             </option>
           ))}
         </Select>
-        <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-        <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+        <DateField value={dateFrom} onChange={setDateFrom} />
+        <DateField value={dateTo} onChange={setDateTo} />
       </div>
 
       {isLoading && tasks.length === 0 ? (

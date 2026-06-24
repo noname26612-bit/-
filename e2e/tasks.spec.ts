@@ -38,7 +38,8 @@ test("диспетчер: создание → назначение → пере
   // перенос на новую дату → событие «Перенос» в истории
   await page.getByRole("button", { name: "Перенести" }).click();
   const reDialog = page.getByRole("dialog");
-  await reDialog.locator('input[type="date"]').fill("2026-06-20");
+  await reDialog.locator('[data-testid="reschedule-date"]').fill("2026-06-20");
+  await reDialog.locator('[data-testid="reschedule-date"]').press("Enter");
   await reDialog.getByRole("button", { name: "Перенести" }).click();
   await expect(page.getByText("Перенос")).toBeVisible();
 

@@ -8,6 +8,7 @@ import { PASS_LABEL, PAYMENT_LABEL } from "@/lib/task-ui";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { Field } from "@/components/ui/field";
@@ -238,12 +239,11 @@ export function CreateTaskModal({
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Дата">
-            <Input
-              type="date"
-              data-testid="create-date"
+            <DateField
+              testId="create-date"
               value={form.scheduledDate}
               disabled={noDate}
-              onChange={(e) => set("scheduledDate", e.target.value)}
+              onChange={(v) => set("scheduledDate", v)}
             />
             {!isEdit ? (
               <label className="mt-1.5 flex items-center gap-2 text-sm text-neutral-600">

@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { CalendarPlus } from "lucide-react";
+import { DateField } from "@/components/ui/date-field";
 
 const HORIZON_DAYS = 14; // 2 недели (PRD §14.4)
 
@@ -332,10 +333,10 @@ function AbsenceManager({
             <option value="OTHER">Отсутствие</option>
           </select>
           <label className="flex items-center gap-2 text-sm text-neutral-600">
-            С <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${inputCls} flex-1`} />
+            С <DateField value={from} onChange={setFrom} className="flex-1" />
           </label>
           <label className="flex items-center gap-2 text-sm text-neutral-600">
-            По <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={`${inputCls} flex-1`} />
+            По <DateField value={to} onChange={setTo} className="flex-1" />
           </label>
         </div>
         <input

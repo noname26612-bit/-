@@ -29,6 +29,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { DateField } from "@/components/ui/date-field";
 import { Textarea } from "@/components/ui/textarea";
 import { Modal } from "@/components/ui/modal";
 import { Field } from "@/components/ui/field";
@@ -619,7 +620,7 @@ export function TaskDetailClient({
       <Modal open={action === "reschedule"} onClose={() => setAction(null)} title="Перенести задачу">
         <div className="flex flex-col gap-3">
           <Field label="Новая дата" required>
-            <Input type="date" autoFocus value={newDate} onChange={(e) => setNewDate(e.target.value)} />
+            <DateField testId="reschedule-date" autoFocus value={newDate} onChange={setNewDate} />
           </Field>
           <Field label="Комментарий">
             <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="необязательно" />
