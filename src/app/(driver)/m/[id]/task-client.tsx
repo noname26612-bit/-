@@ -3,7 +3,6 @@
    прав по сессионной куке; next/image оптимизирует через свой прокси без куки и получил бы 404. */
 
 import { useRef, useState } from "react";
-import Link from "next/link";
 import useSWR from "swr";
 import { Phone, Navigation, Loader2, Camera, X, FileText } from "lucide-react";
 import { ApiError } from "@/lib/fetcher";
@@ -28,6 +27,7 @@ import {
 import { StatusBadge } from "@/components/status-badge";
 import { TypeIcon } from "@/components/type-icon";
 import { PhotoLightbox } from "@/components/photo-lightbox";
+import { BackLink } from "@/components/back-link";
 
 // Подсказка для UI: следующий статус по водительской цепочке. Сервер всё равно проверяет матрицу.
 // Переработка (этап A): цепочка схлопнута — «В работу» (взять) → «Завершить». Из паузы — «Вернуть в работу».
@@ -137,12 +137,9 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
     return (
       <div className="p-6">
         <p className="text-base text-red-600">Задача недоступна.</p>
-        <Link
-          href="/m"
-          className="mt-2 inline-flex items-center gap-1 rounded-lg border border-neutral-300 px-3 py-1.5 text-base font-medium text-neutral-700 active:bg-neutral-100"
-        >
-          ← Мои задачи
-        </Link>
+        <BackLink href="/m" className="mt-2">
+          Мои задачи
+        </BackLink>
       </div>
     );
   }
@@ -387,12 +384,7 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
       ) : null}
       {/* Шапка */}
       <div className="border-b border-neutral-100 px-4 py-3">
-        <Link
-          href="/m"
-          className="inline-flex items-center gap-1 rounded-lg border border-neutral-300 px-3 py-1.5 text-base font-medium text-neutral-700 active:bg-neutral-100"
-        >
-          ← Мои задачи
-        </Link>
+        <BackLink href="/m">Мои задачи</BackLink>
         <div className="mt-3 flex items-center justify-between gap-3">
           <span className="flex items-center gap-2 text-lg font-semibold text-neutral-700">
             <TypeIcon name={t.type.icon} className="h-6 w-6" />
