@@ -15,7 +15,10 @@ export function DriverPayrollClient({ initialPeriod }: { initialPeriod: string }
 
   return (
     <main className="px-3 pb-10 pt-3">
-      <Link href="/m" className="text-sm text-neutral-500">
+      <Link
+        href="/m"
+        className="inline-flex items-center gap-1 rounded-lg border border-neutral-300 px-3 py-1.5 text-base font-medium text-neutral-700 active:bg-neutral-100"
+      >
         ← Мои задачи
       </Link>
       <h1 className="mt-2 text-xl font-bold text-neutral-900">Мой расчёт</h1>

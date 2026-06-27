@@ -290,8 +290,8 @@ function TaskCard({
       />
       <Link href={`/m/${task.id}`} className="block py-3 pl-4 pr-3">
         <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5 text-sm font-medium text-neutral-500">
-            <TypeIcon name={task.type.icon} className="h-4 w-4" />
+          <span className="flex items-center gap-1.5 text-base font-semibold text-neutral-700">
+            <TypeIcon name={task.type.icon} className="h-6 w-6" />
             №{task.number}
             {task.priority ? (
               <span className="text-red-500" aria-hidden>
