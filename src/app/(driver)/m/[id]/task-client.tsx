@@ -3,7 +3,6 @@
    прав по сессионной куке; next/image оптимизирует через свой прокси без куки и получил бы 404. */
 
 import { useRef, useState } from "react";
-import Link from "next/link";
 import useSWR from "swr";
 import { Phone, Navigation, Loader2, Camera, X, FileText } from "lucide-react";
 import { ApiError } from "@/lib/fetcher";
@@ -27,6 +26,8 @@ import {
 } from "@/lib/task-ui";
 import { StatusBadge } from "@/components/status-badge";
 import { TypeIcon } from "@/components/type-icon";
+import { PhotoLightbox } from "@/components/photo-lightbox";
+import { BackLink } from "@/components/back-link";
 
 // Подсказка для UI: следующий статус по водительской цепочке. Сервер всё равно проверяет матрицу.
 // Переработка (этап A): цепочка схлопнута — «В работу» (взять) → «Завершить». Из паузы — «Вернуть в работу».
@@ -109,6 +110,8 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
 
   const [busy, setBusy] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
+  // Полноэкранный просмотр фото (URL вложения) — закрытие крестиком/свайпом/«назад».
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [holdOpen, setHoldOpen] = useState(false);
   const [reason, setReason] = useState("");
@@ -134,9 +137,9 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
     return (
       <div className="p-6">
         <p className="text-base text-red-600">Задача недоступна.</p>
-        <Link href="/m" className="mt-2 inline-block text-base text-neutral-600 underline">
-          ← Мои задачи
-        </Link>
+        <BackLink href="/m" className="mt-2">
+          Мои задачи
+        </BackLink>
       </div>
     );
   }
@@ -381,12 +384,10 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
       ) : null}
       {/* Шапка */}
       <div className="border-b border-neutral-100 px-4 py-3">
-        <Link href="/m" className="text-sm text-neutral-500">
-          ← Мои задачи
-        </Link>
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <span className="flex items-center gap-2 text-sm font-medium text-neutral-500">
-            <TypeIcon name={t.type.icon} className="h-5 w-5" />
+        <BackLink href="/m">Мои задачи</BackLink>
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <span className="flex items-center gap-2 text-lg font-semibold text-neutral-700">
+            <TypeIcon name={t.type.icon} className="h-6 w-6" />
             №{t.number}
             {t.priority ? (
               <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-700">
@@ -397,7 +398,7 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
           <StatusBadge status={displayStatus} className="text-sm" />
         </div>
         <h1 className="mt-1 text-xl font-bold leading-snug text-neutral-900">{t.title}</h1>
-        <p className="mt-0.5 text-sm text-neutral-500">{t.type.name}</p>
+        <p className="mt-1 text-base font-semibold text-neutral-700">{t.type.name}</p>
       </div>
 
       {/* Пропуск — крупный индикатор */}
@@ -493,13 +494,18 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
             <p className="text-xs uppercase tracking-wide text-neutral-400">Фото от диспетчера</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {refPhotos.map((a) => (
-                <a key={a.id} href={`/api/attachments/${a.id}`} target="_blank" rel="noopener">
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => setLightbox(`/api/attachments/${a.id}`)}
+                  className="block"
+                >
                   <img
                     src={`/api/attachments/${a.id}`}
                     alt="фото от диспетчера"
                     className="h-20 w-20 rounded-lg object-cover"
                   />
-                </a>
+                </button>
               ))}
             </div>
           </section>
@@ -511,17 +517,25 @@ export function DriverTaskClient({ taskId }: { taskId: string }) {
             <p className="text-xs uppercase tracking-wide text-neutral-400">Моё фото отчёта</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {myPhotos.map((a) => (
-                <a key={a.id} href={`/api/attachments/${a.id}`} target="_blank" rel="noopener">
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => setLightbox(`/api/attachments/${a.id}`)}
+                  className="block"
+                >
                   <img
                     src={`/api/attachments/${a.id}`}
                     alt="фото отчёта"
                     className="h-20 w-20 rounded-lg object-cover"
                   />
-                </a>
+                </button>
               ))}
             </div>
           </section>
         ) : null}
+
+        {/* Полноэкранный просмотр фото (крестик / свайп вверх-вниз / «назад») */}
+        {lightbox ? <PhotoLightbox url={lightbox} onClose={() => setLightbox(null)} /> : null}
 
         {/* Ведомость работ — типы с расценкой (этап 12). Водитель фиксирует работы без цен. */}
         {requiresPricing ? (

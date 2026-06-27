@@ -158,7 +158,7 @@ function ShiftBlock({ today }: { today: string }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function act(op: "open" | "close") {
+  async function act(op: "open" | "close" | "reopen") {
     setBusy(true);
     setErr(null);
     try {
@@ -194,8 +194,19 @@ function ShiftBlock({ today }: { today: string }) {
 
   if (shift.status === "CLOSED") {
     return (
-      <div className="mb-3 rounded-xl border border-neutral-200 bg-white p-3 text-sm text-neutral-500">
-        Смена закрыта · {hhmm(shift.openedAt)}–{hhmm(shift.closedAt)}
+      <div className="mb-3 rounded-xl border border-neutral-200 bg-white p-3">
+        <p className="text-sm text-neutral-500">
+          Смена закрыта · {hhmm(shift.openedAt)}–{hhmm(shift.closedAt)}
+        </p>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void act("reopen")}
+          className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-lg border border-indigo-300 bg-white text-base font-medium text-indigo-700 active:bg-indigo-50 disabled:opacity-60"
+        >
+          Возобновить смену
+        </button>
+        {err ? <p className="mt-1 text-sm text-red-600">{err}</p> : null}
       </div>
     );
   }
@@ -215,7 +226,11 @@ function ShiftBlock({ today }: { today: string }) {
       <button
         type="button"
         disabled={busy}
-        onClick={() => void act("close")}
+        onClick={() => {
+          if (window.confirm("Закрыть смену? Если закроете случайно — потом можно возобновить.")) {
+            void act("close");
+          }
+        }}
         className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-lg border border-neutral-300 bg-white text-base font-medium text-neutral-800 disabled:opacity-60"
       >
         Закрыть смену
@@ -290,8 +305,8 @@ function TaskCard({
       />
       <Link href={`/m/${task.id}`} className="block py-3 pl-4 pr-3">
         <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5 text-sm font-medium text-neutral-500">
-            <TypeIcon name={task.type.icon} className="h-4 w-4" />
+          <span className="flex items-center gap-1.5 text-base font-semibold text-neutral-700">
+            <TypeIcon name={task.type.icon} className="h-6 w-6" />
             №{task.number}
             {task.priority ? (
               <span className="text-red-500" aria-hidden>
